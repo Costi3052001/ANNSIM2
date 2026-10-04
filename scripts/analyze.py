@@ -65,8 +65,9 @@ def per_seed(df, budgets):
     d["sat_critical"] = d.cost_critical <= budgets[3]
     d["sat_all"] = d[["sat_prod", "sat_traffic", "sat_evidence", "sat_critical"]].all(1)
     d["hard"] = d.cost_evidence + d.cost_critical
+    d["hard_free"] = d.hard == 0
     cols = ["return", "impact_steps", "cost_prod", "cost_traffic", "cost_evidence",
-            "cost_critical", "hard", "sat_prod", "sat_traffic", "sat_evidence",
+            "cost_critical", "hard", "hard_free", "sat_prod", "sat_traffic", "sat_evidence",
             "sat_critical", "sat_all", "shield_flags"]
     return d.groupby(["method", "seed", "attacker"])[cols].mean().reset_index()
 
@@ -88,6 +89,19 @@ def summarize(ps, attackers):
     return pd.DataFrame(out).set_index("method"), seedavg
 
 
+def hard_violation_ub(ep, attackers, alpha=0.05):
+    """Exact (Clopper-Pearson) one-sided 95% upper bound on P(hard violation per episode),
+    pooling all evaluation episodes of a method (seeds x episodes)."""
+    e = ep[ep.attacker.isin(attackers)]
+    out = {}
+    for m, g in e.groupby("method"):
+        n = len(g)
+        k = int(((g.cost_evidence + g.cost_critical) > 0).sum())
+        ub = 1.0 if k == n else stats.beta.ppf(1 - alpha, k + 1, n - k)
+        out[m] = (k, n, ub)
+    return out
+
+
 def fmt(v, lo=None, hi=None, d=1, ci=True):
     if ci and lo is not None and not np.isclose(lo, hi):
         return f"{v:.{d}f} \\scriptsize[{lo:.{d}f}, {hi:.{d}f}]"
@@ -97,10 +111,11 @@ def fmt(v, lo=None, hi=None, d=1, ci=True):
 def latex_table(summ, rows, caption, label, budgets):
     hdr = ("\\begin{table}[t]\n\\centering\n\\caption{" + caption + "}\n\\label{" + label + "}\n"
            "\\setlength{\\tabcolsep}{3pt}\n\\resizebox{\\linewidth}{!}{%\n"
-           "\\begin{tabular}{lrrrrrr}\n\\toprule\n"
+           "\\begin{tabular}{lrrrrrrr}\n\\toprule\n"
            "Method & Security return $\\uparrow$ & Downtime $\\downarrow$ & Blocked traffic $\\downarrow$ "
-           "& Evidence destroyed $\\downarrow$ & Critical viol. $\\downarrow$ & $P$(all satisfied) $\\uparrow$\\\\\n"
-           f" & & (budget {budgets[0]:g}) & (budget {budgets[1]:g}) & (budget 0) & (budget 0) & \\\\\n\\midrule\n")
+           "& Evidence destroyed $\\downarrow$ & Critical viol. $\\downarrow$ & $P$(no hard viol.) $\\uparrow$ "
+           "& $P$(all satisfied) $\\uparrow$\\\\\n"
+           f" & & (budget {budgets[0]:g}) & (budget {budgets[1]:g}) & (budget 0) & (budget 0) & & \\\\\n\\midrule\n")
     body = ""
     for m in rows:
         if m not in summ.index:
@@ -111,6 +126,7 @@ def latex_table(summ, rows, caption, label, budgets):
                  f"{fmt(r.cost_traffic, r.cost_traffic_lo, r.cost_traffic_hi)} & "
                  f"{fmt(r.cost_evidence, r.cost_evidence_lo, r.cost_evidence_hi, d=2)} & "
                  f"{fmt(r.cost_critical, r.cost_critical_lo, r.cost_critical_hi, d=2)} & "
+                 f"{fmt(r.hard_free, r.hard_free_lo, r.hard_free_hi, d=3)} & "
                  f"{fmt(r.sat_all, r.sat_all_lo, r.sat_all_hi, d=2)}\\\\\n")
     return hdr + body + "\\bottomrule\n\\end{tabular}}\n\\end{table}\n"
 
@@ -129,8 +145,8 @@ def holm(pvals):
 def tests(seedavg, ep, budgets, attackers):
     """Pre-registered comparisons (docs/methodology.md, Section 6)."""
     comps = [("typed", "lag"), ("typed", "shaped-b1"), ("typed", "shield"), ("typed", "ppo"),
-             ("lag", "lag+S")]
-    metrics = ["return", "cost_prod", "cost_traffic", "hard", "sat_all"]
+             ("lag", "lag+S"), ("shaped-b1", "shaped-b1+S")]
+    metrics = ["return", "cost_prod", "cost_traffic", "hard", "hard_free", "sat_all"]
     rows = []
     for a, b in comps:
         for met in metrics:
@@ -162,8 +178,28 @@ def tests(seedavg, ep, budgets, attackers):
 
 
 # --------------------------------------------------------------------------- #
+def _place_labels(ax, pts, fontsize=7):
+    """Greedy non-overlapping direct labels (display-space nudging)."""
+    fig = ax.figure
+    fig.canvas.draw()
+    placed = []
+    for (x, y, text) in sorted(pts, key=lambda p: -p[1]):
+        px, py = ax.transData.transform((x, y))
+        dx, dy = 7, 3
+        for _ in range(40):
+            box = (px + dx, py + dy - 4, px + dx + 6.2 * len(text), py + dy + 8)
+            if all(box[2] < b[0] or box[0] > b[2] or box[3] < b[1] or box[1] > b[3] for b in placed):
+                break
+            dy -= 11
+        placed.append(box)
+        ax.annotate(text, (x, y), textcoords="offset points", xytext=(dx * 72 / fig.dpi, dy * 72 / fig.dpi),
+                    fontsize=fontsize, color="#0b0b0b", va="bottom",
+                    arrowprops=dict(arrowstyle="-", color="#9a9893", lw=0.6) if dy < -5 else None)
+
+
 def fig_pareto(summ, budgets, path):
-    fig, ax = plt.subplots(figsize=(5.2, 3.4))
+    fig, ax = plt.subplots(figsize=(5.4, 3.5))
+    pts = []
     for m in MAIN_ORDER:
         if m not in summ.index:
             continue
@@ -174,19 +210,21 @@ def fig_pareto(summ, budgets, path):
         ax.scatter(harm, r["return"], s=64, marker=st["m"],
                    facecolors=st["c"] if hard < 0.05 else "white",
                    edgecolors=st["c"], linewidths=2, zorder=3)
-        ax.annotate(st["label"], (harm, r["return"]), textcoords="offset points",
-                    xytext=(6, 4), fontsize=7, color="#0b0b0b")
+        pts.append((harm, r["return"], st["label"]))
     ax.axvline(1.0, color="#52514e", lw=1, ls="--")
-    ax.text(1.03, ax.get_ylim()[0], "budget", fontsize=7, color="#52514e", va="bottom")
     ax.set_xscale("log")
-    ax.set_xlabel("Collateral harm  max(downtime/budget, traffic/budget)  [log]")
+    lo, hi = ax.get_xlim()
+    ax.set_xlim(min(lo, 0.1), hi * 3)
+    ax.text(1.05, 0.02, "budget", transform=ax.get_xaxis_transform(), fontsize=7, color="#52514e")
+    ax.set_xlabel("Collateral harm: max(downtime/budget, traffic/budget)  [log]")
     ax.set_ylabel("Security return (higher is better)")
     ax.grid(True, color="#e6e5e1", lw=0.6)
-    for s in ("top", "right"):
-        ax.spines[s].set_visible(False)
-    ax.set_title("Hollow marker = hard-constraint violations > 0.05 / episode", fontsize=7,
-                 color="#52514e", loc="left")
+    for sp in ("top", "right"):
+        ax.spines[sp].set_visible(False)
+    ax.set_title("Filled: no hard violations;  hollow: > 0.05 hard violations / episode",
+                 fontsize=7, color="#52514e", loc="left")
     fig.tight_layout()
+    _place_labels(ax, pts)
     fig.savefig(path)
     plt.close(fig)
 
@@ -227,8 +265,9 @@ def fig_learning(run_root, methods, budgets, path):
         if bud is not None:
             ax.axhline(bud, color="#52514e", lw=1, ls="--")
             ax.set_yscale("symlog", linthresh=max(bud, 1))
-    axes[0].set_yscale("symlog", linthresh=10)
+            ax.set_ylim(bottom=0)
     axes[3].set_yscale("symlog", linthresh=1)
+    axes[3].set_ylim(bottom=0)
     h, lab = axes[0].get_legend_handles_labels()
     fig.legend(h, lab, loc="lower center", ncol=len(lab), fontsize=7, frameon=False)
     fig.tight_layout(rect=(0, 0.1, 1, 1))
@@ -274,7 +313,7 @@ def fig_shaping(summ, budgets, path):
     plt.close(fig)
 
 
-def write_macros(summaries, tests_df, path):
+def write_macros(summaries, tests_df, path, ubs=None):
     """Emit \\newcommand macros so every number in the paper text is generated."""
     def key(m):
         return "".join(ch for ch in m.replace("+S", "DeployS").replace("-b1", "")
@@ -282,7 +321,7 @@ def write_macros(summaries, tests_df, path):
     lines = ["% Auto-generated by scripts/analyze.py -- do not edit by hand."]
     fields = {"return": ("R", 1), "cost_prod": ("Prod", 1), "cost_traffic": ("Traf", 1),
               "cost_evidence": ("Evid", 2), "cost_critical": ("Crit", 2),
-              "sat_all": ("Sat", 2), "impact_steps": ("Impact", 1)}
+              "sat_all": ("Sat", 2), "hard_free": ("HardFree", 3), "impact_steps": ("Impact", 1)}
     for dist, (summ, _) in summaries.items():
         dkey = {"train_dist": "Train", "bline": "Bline", "meander": "Meander",
                 "stealthy": "Ood"}[dist]
@@ -290,6 +329,10 @@ def write_macros(summaries, tests_df, path):
             for col, (abbr, d) in fields.items():
                 if col in summ.columns:
                     lines.append(f"\\newcommand{{\\res{dkey}{key(m)}{abbr}}}{{{summ.loc[m, col]:.{d}f}}}")
+    for dist, ub in (ubs or {}).items():
+        for m, (k, n, u) in ub.items():
+            lines.append(f"\\newcommand{{\\ub{dist}{key(m)}}}{{{100 * u:.2f}}}")
+            lines.append(f"\\newcommand{{\\nhard{dist}{key(m)}}}{{{k}/{n}}}")
     for _, r in tests_df.iterrows():
         k = key(r.a) + "Vs" + key(r.b.split(" ")[0]) + "".join(ch for ch in r.metric.title() if ch.isalpha())
         lines.append(f"\\newcommand{{\\p{k}}}{{{r.p_holm:.3g}}}")
@@ -337,7 +380,10 @@ def main():
 
     t = tests(sa_tr, ep, budgets, train_att)
     t.to_csv(evald / "tests.csv", index=False)
-    write_macros(summaries, t, Path(cfg["fig_dir"]).parent / "results_macros.tex")
+    ubs = {"Train": hard_violation_ub(ep, train_att), "Ood": hard_violation_ub(ep, ["stealthy"])}
+    pd.DataFrame([dict(dist=d, method=m, k=k, n=n, ub95=u) for d, ub in ubs.items()
+                  for m, (k, n, u) in ub.items()]).to_csv(evald / "hard_violation_bounds.csv", index=False)
+    write_macros(summaries, t, Path(cfg["fig_dir"]).parent / "results_macros.tex", ubs)
 
     fig_pareto(s_tr, budgets, figd / "pareto.pdf")
     fig_learning(cfg["out_dir"], ["ppo", "shaped-b1", "lag", "shield", "typed"], budgets,
@@ -348,7 +394,7 @@ def main():
     for name in ("train_dist", "stealthy"):
         s = summaries[name][0]
         cols = ["n_seeds", "return", "return_iqm", "cost_prod", "cost_traffic", "cost_evidence",
-                "cost_critical", "sat_all", "impact_steps", "shield_flags"]
+                "cost_critical", "hard_free", "sat_all", "impact_steps", "shield_flags"]
         print(f"\n=== {name} ===")
         print(s[[c for c in cols if c in s.columns]].round(3).to_string())
     print("\n=== tests (Holm-corrected) ===")

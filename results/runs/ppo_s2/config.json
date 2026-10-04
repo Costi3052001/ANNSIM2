@@ -1,0 +1,42 @@
+{
+  "method": "ppo",
+  "seed": 2,
+  "total_steps": 1000000,
+  "n_envs": 8,
+  "n_steps": 256,
+  "epochs": 10,
+  "minibatch": 256,
+  "lr": 0.0003,
+  "gamma": 0.99,
+  "gae_lambda": 0.95,
+  "clip": 0.2,
+  "ent_coef": 0.01,
+  "vf_coef": 0.5,
+  "max_grad_norm": 0.5,
+  "hidden": 64,
+  "arch": "entity",
+  "reward_scale": 0.1,
+  "budgets": [
+    10.0,
+    50.0,
+    0.0,
+    0.0
+  ],
+  "lagrange_lr": 0.05,
+  "lagrange_init": 0.0,
+  "shaping_beta": 1.0,
+  "shaping_u": [
+    1.0,
+    1.0,
+    10.0,
+    10.0
+  ],
+  "attackers": [
+    "bline",
+    "meander"
+  ],
+  "out_dir": "results/runs",
+  "log_every": 1,
+  "torch_threads": 1,
+  "env": {}
+}

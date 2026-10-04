@@ -29,11 +29,11 @@ shield-only, and a SOC playbook, in a purpose-built simulator.
 | `safeacd/env.py` | **SafeACD-Sim**: 12-host CAGE-2-like network, red/green processes, 77 actions, separate reward and 4 cost channels |
 | `safeacd/red.py` | B-line, Meander and held-out Stealthy attackers |
 | `safeacd/shield.py` | Preemptive shield: H1 image-before-reimage, H2 never isolate the OpServer |
-| `safeacd/ppo.py` | One PPO implementation for all conditions (`ppo`, `shaped`, `lag`, `shield`, `typed`), multi-head critic, Adam dual update |
+| `safeacd/ppo.py` | One PPO implementation for all conditions (`ppo`, `shaped`, `lag`, `shield`, `typed`): entity-based (host-shared) actor-critic with multi-head critic, clipped dual ascent for the Lagrange multipliers |
 | `safeacd/playbook.py` | SOC playbook, random and no-defence reference policies |
 | `safeacd/evaluate.py` | Common-random-number evaluation harness |
 | `configs/experiment.yaml` | The pre-registered experimental grid |
-| `scripts/` | `calibrate.py`, `run_experiments.py`, `evaluate_all.py`, `analyze.py` |
+| `scripts/` | `calibrate.py`, `run_experiments.py`, `evaluate_all.py`, `analyze.py`, `sensitivity.py` |
 | `docs/literature_review.md` | Related work, gap analysis, venue facts |
 | `docs/methodology.md` | **Protocol**: RQs and hypotheses, V&V, statistics, threats, timeline |
 | `paper/` | LaTeX draft (`main.tex`, `refs.bib`), generated `tables/` and `figures/` |
@@ -49,6 +49,7 @@ python scripts/calibrate.py    # operational validation (paper Table 2)
 python scripts/run_experiments.py --config configs/experiment.yaml --jobs 4   # resumable
 python scripts/evaluate_all.py   --config configs/experiment.yaml --jobs 4
 python scripts/analyze.py        --config configs/experiment.yaml             # tables, figures, tests
+python scripts/sensitivity.py    --config configs/experiment.yaml --jobs 4    # parameter sensitivity table
 cd paper && latexmk -pdf main.tex
 ```
 

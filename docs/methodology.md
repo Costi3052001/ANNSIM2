@@ -152,9 +152,16 @@ SOC signals (a POMDP for the defender).
      quarantine User0 forever and freeze the attacker.
   2. Alert-scoped evidence created a dead-lock: an attacker acting
      continuously on a host invalidated every new image.
-- **Sensitivity analysis** (if space allows; otherwise the appendix or the
-  artefact): vary `p_detect_*` ±25%, `restore_steps` ∈ {1, 2, 3} and the
-  budgets ×{0.5, 2}. Report the direction of the effect on the Typed–Lag gap.
+- **Sensitivity analysis** (`scripts/sensitivity.py`; evaluation only, no
+  retraining):
+  - Trained Typed, Lag and Shaped policies, and the playbook, are re-run
+    under perturbed parameters: detection ±25%, restore time 1 or 3 steps,
+    false alerts ×5, and exploit success 0.9.
+  - 50 CRN episodes per training attacker for each variant.
+  - We report whether the *ordering* of methods on hard-violation rate and
+    P(all satisfied) is preserved.
+  - Retraining with perturbed budgets (×0.5, ×2) is optional, for the
+    appendix or the artefact.
 
 ### 3.4 The shield (`safeacd/shield.py`)
 - **H1 (image before reimage).** Restore(h) is allowed only if a forensic
@@ -302,6 +309,7 @@ python scripts/calibrate.py     # reference-policy calibration table (§3.3)
 python scripts/run_experiments.py --config configs/experiment.yaml --jobs 4   # resumable
 python scripts/evaluate_all.py   --config configs/experiment.yaml --jobs 4
 python scripts/analyze.py        --config configs/experiment.yaml
+python scripts/sensitivity.py    --config configs/experiment.yaml --jobs 4
 cd paper && latexmk -pdf main.tex
 ```
 
