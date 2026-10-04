@@ -50,7 +50,13 @@ a runtime shield, built only from SOC-observable signals, for hard rules
 (``image before reimage'', ``never isolate the OT controller''). Using a
 pre-registered protocol with common random numbers, ten seeds, and a held-out
 attacker, we compare reward-only PPO, reward shaping, PPO-Lagrangian, shielded
-PPO and \typed{}. \todo{one-sentence headline result from results/eval/summary\_train\_dist.csv}
+PPO and \typed{}. Reward-only PPO attains the best security score by
+severing the OT controller and blocking legitimate traffic at many times the
+budget. Shaping and PPO-Lagrangian keep the budgets but still violate a hard
+constraint in \resTrainShapedHardFreePctViol\% and \resTrainLagHardFreePctViol\% of
+episodes, even with an evidence multiplier near \lamFinalLagEvidence. \typed{}
+meets both budgets and is free of hard violations in \resTrainTypedHardFreePct\% of
+episodes; the residual is attributable to undetected compromises.
 Simulator, agents and protocol are released for reproduction.
 \end{abstract}
 
@@ -370,18 +376,106 @@ training} (log scale).}
 \label{fig:learning}
 \end{figure}
 
-\paragraph{RQ1: The cost of maximising reward.} \todo{fill from tables/main.tex and figures/shaping.pdf}
+\paragraph{RQ1: Maximising reward is maximally harmful, and penalties are a price.}
+Reward-only PPO reaches a near-perfect security return
+(\resTrainPpoR; Table~\ref{tab:main}) by severing the OT controller for
+\resTrainPpoCrit{} of 100 steps per episode, keeping production hosts offline
+for \resTrainPpoProd{} host-steps (budget 10), blocking \resTrainPpoTraf{}
+units of legitimate traffic (budget 50) and destroying evidence
+\resTrainPpoEvid{} times per episode. Adding the shield alone (PPO+Shield)
+removes the hard violations but not the budget harm (\resTrainShieldProd{} and
+\resTrainShieldTraf). Reward shaping with $\beta=1$ keeps both budgets and
+never isolates the controller, yet destroys evidence \resTrainShapedEvid{}
+times per episode and violates a hard constraint in
+\resTrainShapedHardFreePctViol\% of episodes, although each evidence
+destruction is penalised ten times more than a server-step of downtime: the
+agent has simply priced the irreversible harm in. Figure~\ref{fig:shaping}
+shows that no single $\beta$ removes this behaviour without giving up
+security \todo{confirm wording against the $\beta$-sweep figure}.
 
-\paragraph{RQ2: Typed versus untyped constraints.} \todo{fill; cite tests.csv}
+\paragraph{RQ2: Typing the constraints.}
+\typed{} satisfies both budgets in expectation (downtime
+\resTrainTypedProd, traffic \resTrainTypedTraf) and is free of hard
+violations in \resTrainTypedHardFreePct\% of episodes
+(\nhardTrainTyped{} episodes with a violation; 95\% upper bound
+\ubTrainTyped\%), all of which are monitor-relative H1 misses; the OT rule is
+never violated. PPO-Lagrangian, which treats evidence and the OT rule as
+zero-budget constraints, ends training with multipliers of
+$\lambda_{\text{evid}}\approx\lamFinalLagEvidence$ and
+$\lambda_{\text{crit}}\approx\lamFinalLagCritical$, yet still commits a hard
+violation in \resTrainLagHardFreePctViol\% of episodes and exceeds the traffic
+budget (\resTrainLagTraf). Expectation constraints are the wrong contract for
+irreversible harm: the multiplier only grows \emph{after} violations have
+happened, so they accumulate throughout training (Figure~\ref{fig:learning},
+right) and persist at deployment. Security is comparable
+(\resTrainTypedR{} vs.\ \resTrainLagR; $p_{\text{Holm}}=\pTypedVsLagReturn$),
+and \typed{} meets all four constraints in more episodes
+(\resTrainTypedSatPct\% vs.\ \resTrainLagSatPct\%;
+$p_{\text{Holm}}=\pTypedVsLagSatAll$). Against the incumbent playbook, whose
+mean harm defines the budgets, \typed{} incurs the same downtime and traffic
+(paired CRN tests, $p_{\text{Holm}}=\pTypedVsPlaybookCostProd$ and
+$\pTypedVsPlaybookCostTraffic$) but a lower security return
+(\resTrainTypedR{} vs.\ \resTrainPlaybookR;
+$p_{\text{Holm}}=\pTypedVsPlaybookReturn$).
 
-\paragraph{RQ3: Shield during training or only at deployment?} \todo{fill from tables/ablation.tex}
+\paragraph{RQ3: The shield belongs in the training loop.}
+Attaching the shield only at deployment (bottom block of
+Table~\ref{tab:main}) removes most hard violations, but its effect on
+security depends on how much the policy relied on unsafe shortcuts.
+PPO-Lagrangian, which had partly learned to image first, loses little
+(\resTrainLagR{} $\to$ \resTrainLagDeployR). Shaped PPO, whose learned
+remediation is ``reimage without imaging'', collapses
+(\resTrainShapedR{} $\to$ \resTrainShapedDeployR;
+$p_{\text{Holm}}=\pShapedVsShapedDeployReturn$), because the masked policy
+is far from the one that was trained. Reward-only PPO with the shield still
+exceeds the budgets by an order of magnitude. Training with the shield lets
+the policy learn the ``image, then reimage'' sequence instead.
 
-\paragraph{RQ4: Held-out attacker.} \todo{fill from tables/ood.tex}
+\paragraph{RQ4: A held-out attacker.}
+Against the unseen low-and-slow attacker (Table~\ref{tab:ood}) every defender
+degrades, and every one, including the playbook, exceeds the budgets: budgets
+hold only in expectation under the training distribution. H2 still holds by
+construction. H1's monitor-relative gap widens as detection gets worse:
+\typed{} is free of hard violations in \resOodTypedHardFreePct\% of episodes,
+against \resOodLagHardFreePct\% for PPO-Lagrangian and
+\resOodShapedHardFreePct\% for shaping. The residuals come from images that
+predate a new, undetected compromise. Requiring the image to be at most one
+step old (Table~\ref{tab:freshness}) closes most of this gap at deployment
+\todo{confirm from tables/freshness.tex}.
+
+\IfFileExists{tables/ood.tex}{\input{tables/ood.tex}}{}
+\IfFileExists{tables/freshness.tex}{\input{tables/freshness.tex}}{}
+
+\begin{figure}[t]
+\centering
+\IfFileExists{figures/shaping.pdf}{\includegraphics[width=0.9\linewidth]{figures/shaping.pdf}}{\todo{shaping sweep}}
+\caption{Reward shaping across penalty weights $\beta$ (mean and 95\% CI over
+seeds), with \typed{} and PPO-Lagrangian as horizontal references.}
+\label{fig:shaping}
+\end{figure}
 
 % ----------------------------------------------------------------------------
 \section{Discussion and Threats to Validity}
 % ----------------------------------------------------------------------------
-\paragraph{Implications.} \todo{after results}
+\paragraph{Implications for ACD design.}
+Three lessons carry over to other environments.
+(i)~\emph{Separate the signals.} With harm emitted as cost channels rather
+than folded into reward, any method's collateral damage is measurable,
+including a reward-only baseline that looks best on the usual security
+metric.
+(ii)~\emph{Choose the mechanism by type.} A penalty or a multiplier turns an
+irreversible harm into a price. A shield that encodes the operational rule
+the SOC already follows (image before reimage; never sever the OT
+controller) prevents it, and leaves budget-type harms to the Lagrangian
+relaxation, which handles them well.
+(iii)~\emph{State guarantees relative to the monitor.} A shield built on SOC
+observables is only as good as detection. Reporting residuals, and testing
+against a stealthier attacker, makes this limit visible rather than hiding it
+behind ``safe by construction''.
+In this small network a well-engineered playbook remains a strong baseline,
+with better security at the same harm. The contribution here is not that RL
+beats playbooks, but how a learned defender must be constrained before it
+can be trusted alongside one.
 
 \paragraph{Threats.}
 \emph{Internal:} hyper-parameters were shared, not tuned per condition; the
@@ -398,7 +492,15 @@ bounds.
 % ----------------------------------------------------------------------------
 \section{Conclusion}
 % ----------------------------------------------------------------------------
-\todo{3--4 sentences after results}
+A cyber-defence agent should not be allowed to buy security with harm it
+cannot undo. In \safeacd{}, reward maximisation bought security by severing
+the OT controller and destroying evidence. Penalties and Lagrange multipliers
+turned that harm into a price the agent was willing to pay. A typed design,
+with budgets for recoverable harm and an observation-based shield for
+irreversible harm, kept collateral damage within the playbook's envelope and
+made hard violations rare and attributable to monitoring gaps. Next steps
+are to port the cost channels to CybORG CAGE-4, model graded (volatility-ordered)
+evidence, and synthesise shields from SOC runbooks.
 
 \paragraph{Artefact availability.} Simulator, agents, configuration, raw
 evaluation records and analysis scripts: \todo{anonymised repository / Zenodo DOI}.

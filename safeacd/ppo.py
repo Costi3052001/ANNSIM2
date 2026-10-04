@@ -412,7 +412,8 @@ def train(cfg: TrainConfig, verbose: bool = True) -> Path:
 class TrainedPolicy:
     """Wraps a trained network as an evaluation agent."""
 
-    def __init__(self, path, use_shield: bool | None = None, greedy: bool = False, seed: int = 0):
+    def __init__(self, path, use_shield: bool | None = None, greedy: bool = False, seed: int = 0,
+                 shield: Shield | None = None):
         ck = torch.load(Path(path) / "model.pt", weights_only=False)
         self.cfg = ck["config"]
         self.ac = make_actor_critic(self.cfg.get("arch", "mlp"), self.cfg["hidden"])
@@ -420,7 +421,7 @@ class TrainedPolicy:
         self.ac.eval()
         trained_shield, _, _ = method_flags(self.cfg["method"])
         self.use_shield = trained_shield if use_shield is None else use_shield
-        self.shield = Shield() if self.use_shield else None
+        self.shield = (shield or Shield()) if self.use_shield else None
         self.greedy = greedy
         self.gen = torch.Generator().manual_seed(seed)
 

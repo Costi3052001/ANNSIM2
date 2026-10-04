@@ -51,3 +51,17 @@ def test_unshielded_random_agent_does_violate():
             _, _, c, done, _ = env.step(a)
             total += c
     assert total[2] > 0 and total[3] > 0
+
+
+def test_freshness_window_only_tightens_h1():
+    from safeacd.env import A_FORENSICS
+    env = SafeACDEnv(seed=0)
+    env.reset(seed=5, attacker="bline")
+    u = int(np.flatnonzero(env.tainted)[0])
+    env.step(host_action(A_FORENSICS, u))
+    a = host_action(A_RESTORE, u)
+    assert Shield(max_image_age=1).safe_mask(env)[a]          # fresh image: allowed
+    for _ in range(3):
+        env.step(0)
+    if Shield().safe_mask(env)[a]:                             # still valid under H1 ...
+        assert not Shield(max_image_age=1).safe_mask(env)[a]   # ... but too old for H1+freshness

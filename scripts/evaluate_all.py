@@ -25,8 +25,23 @@ def label(cfg):
     return f"shaped-b{cfg['shaping_beta']:g}" if m == "shaped" else m
 
 
+def _cached(cache: Path, fn):
+    """Per-run cache so evaluation is incremental (re-running skips finished runs)."""
+    if cache.exists():
+        return pd.read_csv(cache).to_dict("records")
+    rows = fn()
+    cache.parent.mkdir(parents=True, exist_ok=True)
+    pd.DataFrame(rows).to_csv(cache, index=False)
+    return rows
+
+
 def _eval_run(args):
-    run_dir, attackers, n_ep, deploy_shield = args
+    run_dir, attackers, n_ep, deploy_shield, cache = args
+    tag = f"{Path(run_dir).name}_n{n_ep}_{'-'.join(attackers)}{'_S' if deploy_shield else ''}.csv"
+    return _cached(Path(cache) / tag, lambda: _eval_run_uncached(run_dir, attackers, n_ep, deploy_shield))
+
+
+def _eval_run_uncached(run_dir, attackers, n_ep, deploy_shield):
     torch.set_num_threads(1)
     cfg = json.load(open(Path(run_dir) / "config.json"))
     rows = []
@@ -43,7 +58,12 @@ def _eval_run(args):
 
 
 def _eval_baseline(args):
-    name, attackers, n_ep = args
+    name, attackers, n_ep, cache = args
+    tag = f"baseline-{name}_n{n_ep}_{'-'.join(attackers)}.csv"
+    return _cached(Path(cache) / tag, lambda: _eval_baseline_uncached(name, attackers, n_ep))
+
+
+def _eval_baseline_uncached(name, attackers, n_ep):
     agents = {"playbook": PlaybookAgent, "sleep": SleepAgent, "random": lambda: RandomAgent(0)}
     rows = []
     for att in attackers:
@@ -63,16 +83,17 @@ def main():
     ev = cfg["eval"]
     n_ep = args.episodes or ev["episodes"]
     run_dirs = sorted(p.parent for p in Path(cfg["out_dir"]).glob("*/model.pt"))
+    cache = str(Path(cfg["eval_dir"]) / "per_run")
     jobs = []
     for rd in run_dirs:
         c = json.load(open(rd / "config.json"))
-        jobs.append((str(rd), ev["attackers"], n_ep, c["method"] in ev["deploy_shield_for"]))
+        jobs.append((str(rd), ev["attackers"], n_ep, c["method"] in ev["deploy_shield_for"], cache))
     rows = []
     with Pool(args.jobs) as pool:
         for i, part in enumerate(pool.imap_unordered(_eval_run, jobs)):
             rows += part
             print(f"evaluated {i + 1}/{len(jobs)}", flush=True)
-        for part in pool.imap_unordered(_eval_baseline, [(b, ev["attackers"], n_ep) for b in ev["baselines"]]):
+        for part in pool.imap_unordered(_eval_baseline, [(b, ev["attackers"], n_ep, cache) for b in ev["baselines"]]):
             rows += part
     out = Path(cfg["eval_dir"])
     out.mkdir(parents=True, exist_ok=True)

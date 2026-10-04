@@ -30,14 +30,30 @@ RULES = ("H1_image_before_reimage", "H2_never_isolate_opserver")
 
 
 class Shield:
-    def __init__(self, rules=RULES):
+    """Preemptive shield.
+
+    ``max_image_age`` (steps) optionally tightens H1 with a freshness window:
+    the image must also be at most that old.  This narrows the window in which
+    an *undetected* new compromise can slip in between imaging and reimaging
+    (a deployment-time variant evaluated in the RQ4 discussion).
+    """
+
+    def __init__(self, rules=RULES, max_image_age: int | None = None):
         self.rules = set(rules)
+        self.max_image_age = max_image_age
+
+    def _h1_allowed(self, env) -> np.ndarray:
+        ok = env.image_valid()
+        if self.max_image_age is not None:
+            age_half_steps = 2 * env.t - env.image_time
+            ok = ok & (age_half_steps <= 2 * self.max_image_age)
+        return ok
 
     def safe_mask(self, env) -> np.ndarray:
         m = np.ones(N_ACTIONS, dtype=bool)
         if "H1_image_before_reimage" in self.rules:
             start = host_action(A_RESTORE, 0)
-            m[start:start + N_HOSTS] = env.image_valid()
+            m[start:start + N_HOSTS] = self._h1_allowed(env)
         if "H2_never_isolate_opserver" in self.rules:
             m[host_action(A_ISOLATE, OP_SERVER)] = False
         return m
@@ -46,7 +62,7 @@ class Shield:
         """Human-readable reason an action is blocked (for audit logs)."""
         from .env import decode_action
         name, h = decode_action(action)
-        if name == "Restore" and "H1_image_before_reimage" in self.rules and not env.image_valid()[h]:
+        if name == "Restore" and "H1_image_before_reimage" in self.rules and not self._h1_allowed(env)[h]:
             return f"H1: Restore({h}) blocked - no forensic image after ticket opened"
         if name == "Isolate" and h == OP_SERVER and "H2_never_isolate_opserver" in self.rules:
             return "H2: Isolate(OpServer) blocked - safety-critical asset"
