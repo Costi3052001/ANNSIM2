@@ -24,6 +24,7 @@
 \newcommand{\typed}{\textsc{Typed}}
 \newcommand{\todo}[1]{\textcolor{red}{[TODO: #1]}}
 \IfFileExists{results_macros.tex}{\input{results_macros.tex}}{}
+\IfFileExists{freshness_macros.tex}{\input{freshness_macros.tex}}{}
 
 \title{Defend Without Destroying: Typed Safety Constraints for\\
 Reinforcement-Learning Cyber Defence Agents in Simulation}
@@ -439,9 +440,16 @@ construction. H1's monitor-relative gap widens as detection gets worse:
 \typed{} is free of hard violations in \resOodTypedHardFreePct\% of episodes,
 against \resOodLagHardFreePct\% for PPO-Lagrangian and
 \resOodShapedHardFreePct\% for shaping. The residuals come from images that
-predate a new, undetected compromise. Requiring the image to be at most one
-step old (Table~\ref{tab:freshness}) closes most of this gap at deployment
-\todo{confirm from tables/freshness.tex}.
+predate a new, undetected compromise. Adding an image-freshness window to H1
+at deployment (Table~\ref{tab:freshness}) narrows that window. Requiring the
+image to be at most three steps old raises the violation-free rate against
+the stealthy attacker from \freshOodKNoneHardFreePct\% to
+\freshOodKThreeHardFreePct\% (one step: \freshOodKOneHardFreePct\%), at a
+small cost in security. Under the training distribution, however, tightening
+the rule only at deployment costs security (\freshTrainKNoneR{} $\to$
+\freshTrainKOneR{} for one step) and pushes traffic over budget
+(\freshTrainKOneTraf). This is the same train/deploy mismatch as in RQ3, and
+it argues for training with the rule that will be deployed.
 
 \IfFileExists{tables/ood.tex}{\input{tables/ood.tex}}{}
 \IfFileExists{tables/freshness.tex}{\input{tables/freshness.tex}}{}

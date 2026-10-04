@@ -310,6 +310,7 @@ python scripts/run_experiments.py --config configs/experiment.yaml --jobs 4   # 
 python scripts/evaluate_all.py   --config configs/experiment.yaml --jobs 4
 python scripts/analyze.py        --config configs/experiment.yaml
 python scripts/sensitivity.py    --config configs/experiment.yaml --jobs 4
+python scripts/shield_variants.py --config configs/experiment.yaml --jobs 4
 cd paper && latexmk -pdf main.tex
 ```
 

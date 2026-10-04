@@ -33,7 +33,7 @@ shield-only, and a SOC playbook, in a purpose-built simulator.
 | `safeacd/playbook.py` | SOC playbook, random and no-defence reference policies |
 | `safeacd/evaluate.py` | Common-random-number evaluation harness |
 | `configs/experiment.yaml` | The pre-registered experimental grid |
-| `scripts/` | `calibrate.py`, `run_experiments.py`, `evaluate_all.py`, `analyze.py`, `sensitivity.py` |
+| `scripts/` | `calibrate.py`, `run_experiments.py`, `evaluate_all.py`, `analyze.py`, `sensitivity.py`, `shield_variants.py` |
 | `docs/literature_review.md` | Related work, gap analysis, venue facts |
 | `docs/methodology.md` | **Protocol**: RQs and hypotheses, V&V, statistics, threats, timeline |
 | `paper/` | LaTeX draft (`main.tex`, `refs.bib`), generated `tables/` and `figures/` |
@@ -50,6 +50,7 @@ python scripts/run_experiments.py --config configs/experiment.yaml --jobs 4   # 
 python scripts/evaluate_all.py   --config configs/experiment.yaml --jobs 4
 python scripts/analyze.py        --config configs/experiment.yaml             # tables, figures, tests
 python scripts/sensitivity.py    --config configs/experiment.yaml --jobs 4    # parameter sensitivity table
+python scripts/shield_variants.py --config configs/experiment.yaml --jobs 4    # H1 freshness-window ablation (RQ4)
 cd paper && latexmk -pdf main.tex
 ```
 
