@@ -1,0 +1,30 @@
+# Full experimental protocol for the ANNSIM'27 paper.
+# Every number reported in the paper is produced from this file by
+#   python scripts/run_experiments.py --config configs/experiment.yaml
+#   python scripts/evaluate_all.py   --config configs/experiment.yaml
+#   python scripts/analyze.py        --config configs/experiment.yaml
+name: main
+out_dir: results/runs
+eval_dir: results/eval
+fig_dir: paper/figures
+table_dir: paper/tables
+
+train:
+  total_steps: 1000000
+  seeds: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]
+  methods: [ppo, shaped, lag, shield, typed]
+  attackers: [bline, meander]          # training distribution (uniform mixture)
+  budgets: [10.0, 50.0, 0.0, 0.0]      # prod, traffic, evidence, critical (per episode)
+  shaping_beta: 1.0
+  overrides: {}                        # any other TrainConfig field
+
+# RQ1: sensitivity of the reward-shaping baseline to its penalty weight.
+shaping_sweep:
+  betas: [0.1, 0.3, 3.0, 10.0]         # beta = 1.0 is already in the main grid
+  seeds: [0, 1, 2, 3, 4]
+
+eval:
+  episodes: 100
+  attackers: [bline, meander, stealthy]   # stealthy is held out (never trained on)
+  deploy_shield_for: [ppo, lag, shaped]   # RQ3 ablation: shield bolted on at deployment only
+  baselines: [playbook, sleep, random]

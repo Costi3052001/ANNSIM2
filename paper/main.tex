@@ -1,0 +1,378 @@
+% ============================================================================
+% ANNSIM'27 submission draft -- Modeling and Simulation in Cyber Security track
+% NOTE: port to the official SCS/ANNSIM'27 LaTeX template before submission
+% (single column, 12-page limit incl. references -- check the CFP).  This file
+% uses a neutral article layout so it compiles anywhere.
+% ============================================================================
+\documentclass[10pt]{article}
+\usepackage[letterpaper,margin=1in]{geometry}
+\usepackage{times}
+\usepackage[T1]{fontenc}
+\usepackage[utf8]{inputenc}
+\usepackage{amsmath,amssymb}
+\usepackage{graphicx}
+\usepackage{booktabs}
+\usepackage{xcolor}
+\usepackage[numbers,sort&compress]{natbib}
+\usepackage[hidelinks]{hyperref}
+\usepackage{enumitem}
+\setlist{nosep,leftmargin=*}
+
+\newcommand{\safeacd}{\textsc{SafeACD-Sim}}
+\newcommand{\typed}{\textsc{Typed}}
+\newcommand{\todo}[1]{\textcolor{red}{[TODO: #1]}}
+\IfFileExists{results_macros.tex}{\input{results_macros.tex}}{}
+
+\title{Defend Without Destroying: Typed Safety Constraints for\\
+Reinforcement-Learning Cyber Defence Agents in Simulation}
+\author{Anonymous Author(s)\\ \small (double-blind submission)}
+\date{}
+
+\begin{document}
+\maketitle
+
+\begin{abstract}
+A reinforcement-learning (RL) cyber-defence agent cannot simply maximise
+cumulative reward when its actions can disconnect production machines, block
+legitimate traffic, or destroy forensic evidence. Existing autonomous cyber
+defence (ACD) work either folds such harms into a hand-tuned reward or, more
+recently, treats them uniformly as Lagrangian budgets that are satisfied only
+in expectation. We argue that \emph{constraints have types}: downtime and
+blocked traffic are \emph{budget} constraints, whereas evidence destruction and
+severing a safety-critical asset are \emph{hard}, irreversible constraints, and
+the safety mechanism should follow the type. We present \safeacd{}, an
+open-source discrete-time simulation model of a CAGE-2-like enterprise/OT
+network that emits security reward and four defender-induced harm channels
+separately, and a \typed{} agent that combines PPO-Lagrangian for budgets with
+a runtime shield, built only from SOC-observable signals, for hard rules
+(``image before reimage'', ``never isolate the OT controller''). Using a
+pre-registered protocol with common random numbers, ten seeds, and a held-out
+attacker, we compare reward-only PPO, reward shaping, PPO-Lagrangian, shielded
+PPO and \typed{}. \todo{one-sentence headline result from results/eval/summary\_train\_dist.csv}
+Simulator, agents and protocol are released for reproduction.
+\end{abstract}
+
+\noindent\textbf{Keywords:} autonomous cyber defence, safe reinforcement
+learning, constrained MDP, shielding, digital forensics, simulation.
+
+% ----------------------------------------------------------------------------
+\section{Introduction}
+% ----------------------------------------------------------------------------
+Autonomous cyber defence (ACD) agents trained with deep reinforcement learning
+in simulated ``cyber gyms'' such as CybORG \citep{standen2021cyborg,kiely2025cage4}
+can now contain scripted intruders at machine speed
+\citep{foley2022autonomous,vyas2023review,palmer2023survey}. Their training
+objective, however, is almost always a single scalar reward. Whenever a
+defensive action is effective \emph{because} it is harmful---quarantining a
+subnet, severing an industrial controller, or reimaging a host before anyone
+has imaged it---a reward-maximising agent will learn to use it. The resulting
+policies look excellent on the security metric and are unacceptable to the
+security operations centre (SOC) that would have to deploy them.
+
+The community's first response was reward engineering: penalties for restores
+or for disrupting simulated users \citep{kiely2025cage4}. Recent analyses show
+that dense, engineered rewards bias agents towards riskier policies
+\citep{bates2025lessismore,bates2026beyond}. The second response, emerging in
+2026, moves operational costs into a constrained MDP (CMDP)
+\citep{altman1999cmdp} and enforces budgets with Lagrangian multipliers
+\citep{acd3gat2026}. Lagrangian methods, however, guarantee constraint
+satisfaction only \emph{in expectation and asymptotically}
+\citep{ray2019safetygym,stooke2020pid}: an acceptable contract for ``at most
+ten server-hours of downtime per incident'', but not for ``never destroy the
+evidence of an intrusion'', which incident-response standards treat as
+non-negotiable \citep{nist80086,nist80061r3,rfc3227}.
+
+This paper makes the observation that the harms an ACD agent can cause have
+different \emph{types}, and that the safety mechanism should be chosen per
+type. Our contributions are:
+\begin{enumerate}
+\item \textbf{A typed safety formulation for ACD.} We separate \emph{budget}
+constraints (production downtime, blocked legitimate traffic) from \emph{hard}
+constraints (forensic-evidence destruction, isolation of a safety-critical OT
+asset), and pair the former with Lagrangian relaxation and the latter with a
+preemptive shield \citep{alshiekh2018shielding} whose rules use only
+SOC-observable information. To our knowledge this is the first RL-ACD work to
+model evidence preservation as an explicit, irreversible constraint.
+\item \textbf{\safeacd{}, an open simulation model} of a 12-host
+user/enterprise/operational network (mirroring CAGE-2) with scripted
+attackers, benign traffic, forensic imaging, and \emph{separate} reward and
+harm channels, together with its verification and validation (V\&V) evidence.
+\item \textbf{A pre-registered simulation experiment} (5 learning conditions,
+3 reference policies, 10 seeds, 3 attackers, common random numbers) that
+quantifies (RQ1) the harm of reward maximisation and the fragility of reward
+shaping, (RQ2) typed versus untyped constraint handling, (RQ3) whether the
+shield must be present during training, and (RQ4) robustness to a held-out
+attacker, reporting monitor-relative residual violations honestly.
+\end{enumerate}
+
+% ----------------------------------------------------------------------------
+\section{Background and Related Work}
+% ----------------------------------------------------------------------------
+\paragraph{RL for autonomous cyber defence.}
+CybORG and its CAGE challenges \citep{standen2021cyborg,kiely2025cage4} are
+the de-facto benchmarks; hierarchical and multi-agent PPO agents dominate them
+\citep{foley2022autonomous}. Surveys \citep{vyas2023review,palmer2023survey,kott2023aica}
+identify the gap between simulated performance and deployability, and a 2026
+expert workshop distilled environment-design guidelines
+\citep{envworkshop2026}. Environment extensions add realistic actions such as
+isolation \citep{tholl2025production}, and cyber-range studies evaluate
+availability costs of learned responders \citep{nyberg2026range}. Optimal
+stopping formulations offer an analytic alternative \citep{hammar2022stopping}.
+
+\paragraph{Rewards, constraints and safety in ACD.}
+\citet{dutta2021smt} verified RL decisions against SMT-encoded requirements.
+\citet{bates2025lessismore,bates2026beyond} showed that sparse, goal-aligned
+rewards yield lower-risk policies than dense penalties. Closest to us,
+ACD$^3$-GAT \citep{acd3gat2026} formulates multi-agent ACD as a CMDP with
+budgets on mean time to recover, false-positive responses and firewall change
+disruption, enforced by Lagrangian control and counterfactual screening; all
+of its constraints are budgets. \citet{hsain2026shielded} use shield synthesis
+for \emph{design-time} defensibility analysis rather than runtime enforcement,
+and \citet{jamshidi2026sdn} combine PPO with action masking under
+control-plane safety constraints in SDN-IoT. None of these models forensic
+evidence, and none assigns mechanisms by constraint type.
+
+\paragraph{Safe RL.}
+A CMDP \citep{altman1999cmdp} adds cost signals $c_k$ and thresholds $d_k$ to
+an MDP and seeks $\max_\pi J_r(\pi)$ s.t.\ $J_{c_k}(\pi)\le d_k$. Trust-region
+\citep{achiam2017cpo} and Lagrangian \citep{tessler2019rcpo,ray2019safetygym}
+methods solve it in expectation; Lagrangian multipliers are known to overshoot
+and oscillate \citep{stooke2020pid}. Shielding \citep{alshiekh2018shielding}
+instead removes unsafe actions before (preemptive) or after (post-posed) the
+agent chooses, giving per-step guarantees relative to the shield's model;
+invalid-action masking keeps policy gradients well defined
+\citep{huang2022masking}. Irreversible actions are a recognised hazard
+\citep{grinsztajn2021reversibility}. See \citep{garcia2015survey,gu2024review}
+for surveys.
+
+\paragraph{Forensic readiness.}
+NIST SP~800-86 and SP~800-61r3 require evidence to be preserved during
+containment and eradication \citep{nist80086,nist80061r3}; RFC~3227 orders
+artefacts by volatility \citep{rfc3227}. The operational rule of thumb is
+``image before you reimage'': reimaging restores service but irreversibly
+erases the artefacts needed for attribution, scoping and legal action.
+
+% ----------------------------------------------------------------------------
+\section{Typed Safety Constraints}
+% ----------------------------------------------------------------------------
+We model the defender's problem as a partially observable CMDP with security
+reward $r$ and four harm costs $c_1\dots c_4$, each counting only
+\emph{defender-induced} harm:
+\begin{itemize}
+\item $c_{\text{prod}}$ -- criticality-weighted host-steps offline (isolated or being reimaged);
+\item $c_{\text{traf}}$ -- weight of active legitimate flows that could not be served;
+\item $c_{\text{evid}}$ -- reimages of a compromised host whose current incident was never imaged;
+\item $c_{\text{crit}}$ -- steps in which the safety-critical OT controller is isolated.
+\end{itemize}
+We partition constraints into a \emph{budget} set $\mathcal{B}=\{\text{prod},\text{traf}\}$,
+$\mathbb{E}_\pi[\sum_t c_k]\le d_k$, and a \emph{hard} set
+$\mathcal{H}=\{\text{evid},\text{crit}\}$ that must hold on every trajectory,
+$\Pr_\pi[\sum_t c_k>0]=0$.
+
+\paragraph{Mechanism per type.}
+\typed{} solves the budget part by Lagrangian relaxation,
+\begin{equation}
+\max_\pi \min_{\lambda\ge 0}\; J_r(\pi)-\sum_{k\in\mathcal{B}}\lambda_k\bigl(J_{c_k}(\pi)-d_k\bigr),
+\end{equation}
+using PPO \citep{schulman2017ppo} on the normalised combined advantage
+$(A_r-\sum_k\lambda_k A_{c_k})/(1+\sum_k\lambda_k)$ and projected Adam ascent on
+$\lambda$ (as in OmniSafe \citep{ji2024omnisafe}), and enforces the hard part
+with a preemptive shield that masks unsafe actions before sampling:
+\begin{itemize}
+\item[\textbf{H1}] \emph{Image before reimage:} \textsf{Restore}$(h)$ is
+allowed only if a forensic image of $h$ exists that post-dates the host's open
+SOC ticket and its last reimage.
+\item[\textbf{H2}] \emph{Never sever the OT controller:} \textsf{Isolate}(OpServer) is never allowed.
+\end{itemize}
+
+\paragraph{Monitor-relative guarantees.}
+The shield reads only what a SOC has---tickets and image timestamps---never
+the simulator's ground truth. H2 is therefore enforced exactly, whereas H1
+holds \emph{relative to the monitor}: a compromise that begins after an image
+and is never detected can still lose artefacts on reimage. We measure this
+residual rather than claim zero violations by construction.
+
+% ----------------------------------------------------------------------------
+\section{The \safeacd{} Simulation Model}
+% ----------------------------------------------------------------------------
+\paragraph{Structure.}
+\safeacd{} is a discrete-time stochastic simulation (100 steps per episode)
+of 12 hosts in three subnets mirroring CAGE-2: five user workstations, three
+enterprise servers (Ent0--Ent2) and an operational subnet with the
+safety-critical OpServer and three OT hosts. Two zone links (user$\to$enterprise,
+enterprise$\to$operational) can be blocked. Each step the blue agent acts,
+the red agent acts, benign traffic is sampled, alerts are generated, and
+reward and costs are emitted (Table~\ref{tab:params}).
+
+\paragraph{Red agents.}
+Red progresses along an attack graph: an exploit within a zone needs a
+user-level foothold, crossing a zone needs a privileged one; escalation turns
+user into privileged access; a privileged foothold on the OpServer allows a
+mission \emph{impact}. \textsf{B-line} heads straight for the OpServer;
+\textsf{Meander} escalates everywhere and expands subnet by subnet; the
+held-out \textsf{Stealthy} attacker is B-line with 30\% dwell and 60\% lower
+detection probability. The initial foothold is a random, undetected user host,
+and an attacker left without a usable foothold re-phishes with probability 0.1.
+
+\paragraph{Benign traffic and evidence.}
+Fifteen weighted business flows (web, file, authentication, historian, control
+loop) are active with fixed probabilities; a flow is served only if both
+endpoints are online and the zone link is open. Evidence is
+\emph{incident-scoped}: the first compromise of a clean host opens an incident;
+a forensic image taken afterwards preserves it until the host is reimaged.
+
+\paragraph{Defender interface.}
+77 discrete actions: \textsf{Sleep}; per-host \textsf{Analyse},
+\textsf{Forensics} (image), \textsf{Remove} (evicts user-level access only),
+\textsf{Restore} (reimage, host offline for two steps), \textsf{Isolate},
+\textsf{Reconnect}; and \textsf{Block}/\textsf{Unblock} per zone link. The
+87-dimensional observation contains, per host, the SOC ticket severity, the
+alert raised this step, isolation and reimaging flags, and whether a valid
+image exists, plus link states and time.
+
+\begin{table}[t]
+\centering
+\caption{Main \safeacd{} parameters (defaults in \texttt{safeacd/env.py}).}
+\label{tab:params}
+\small
+\begin{tabular}{ll}
+\toprule
+Parameter & Value \\
+\midrule
+Horizon / restore downtime & 100 steps / 2 steps \\
+$P$(exploit), $P$(escalate) & 0.75, 0.80 \\
+$P$(detect exploit / escalate / impact) & 0.85 / 0.70 / 1.0 (Stealthy: $\times 0.4$) \\
+$P$(false alert per host-step), $P$(re-phish) & 0.01, 0.1 \\
+Security reward & $-\sum_h v_h\,(0.5\,[\text{user}]+1\,[\text{priv}])-10\,[\text{impact}]$; $v$ = 0.1 users/OT hosts, 1 servers \\
+Downtime weights & users 0.1, servers/OT hosts 1, OpServer 2 \\
+Budgets $d$ (prod, traf, evid, crit) & 10, 50, 0, 0 per episode \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\paragraph{Verification and validation.}
+Twenty automated tests verify determinism under seeding, the cost semantics
+(image-then-reimage costs no evidence; reimage-without-image costs one; the
+critical rule; blocked-link traffic loss) and the shield invariants. For
+operational validation we ran four reference policies on the evaluation seeds
+(Table~\ref{tab:calib}). The ordering matches expert expectation, and the last
+row exposes the paper's motivating problem: the policy with the best
+\emph{security} return against B-line is the most harmful one. Pilot runs
+also revealed two modelling artefacts that we fixed before the main
+experiment and report as V\&V lessons: (i) a fixed initial foothold (the
+CAGE-2 convention) let every learner quarantine one workstation forever and
+freeze the attacker; (ii) alert-scoped evidence created a dead-lock in which
+an attacker acting on a host invalidated every new image.
+
+\begin{table}[t]
+\centering
+\caption{Operational validation with reference policies (100 CRN episodes
+per attacker; per-episode means). R: security return; prod/traf: downtime and
+blocked-traffic cost. No reference policy destroyed evidence; the reward
+hacker isolates the OpServer in every step (100 critical violations).}
+\label{tab:calib}
+\small
+\begin{tabular}{lrrrrrr}
+\toprule
+& \multicolumn{3}{c}{B-line} & \multicolumn{3}{c}{Meander}\\
+\cmidrule(lr){2-4}\cmidrule(lr){5-7}
+Policy & R & prod & traf & R & prod & traf\\
+\midrule
+No defence & $-1172.7$ & 0.0 & 0.0 & $-1131.0$ & 0.0 & 0.0\\
+Random & $-528.8$ & 328.8 & 1019.4 & $-387.1$ & 328.8 & 1019.4\\
+SOC playbook (image before reimage) & $-78.8$ & 12.5 & 52.4 & $-13.3$ & 3.2 & 31.0\\
+``Isolate OpServer + block'' & $-47.6$ & 200.0 & 1319.2 & $-47.6$ & 200.0 & 1319.2\\
+\bottomrule
+\end{tabular}
+\end{table}
+
+% ----------------------------------------------------------------------------
+\section{Experimental Design}
+% ----------------------------------------------------------------------------
+\paragraph{Conditions.}
+All learning conditions share one PPO implementation and hyper-parameters
+(8 environments $\times$ 256 steps, 10 epochs, minibatch 256, learning rate
+$3\cdot10^{-4}$, $\gamma=0.99$, GAE $\lambda=0.95$, clip 0.2, entropy 0.01,
+tanh MLPs 256--256, critic with one reward and four cost heads); they differ
+only in safety handling: \textbf{PPO} (security reward only);
+\textbf{Shaped}-$\beta$ (reward minus $\beta(c_{\text{prod}}+c_{\text{traf}}+10c_{\text{evid}}+10c_{\text{crit}})$, $\beta=1$
+in the main grid, $\beta\in\{0.1,0.3,3,10\}$ in a sweep); \textbf{Lag} (PPO-Lagrangian
+on all four channels with $d=(10,50,0,0)$); \textbf{Shield} (security reward
+plus shield); and \textbf{\typed{}} (Lagrangian on the two budgets plus shield).
+Invalid-action masking is applied everywhere. The budgets encode ``no more
+collateral harm than the incumbent playbook'': the playbook's mean downtime
+and traffic cost under the training distribution are 7.9 and 41.7.
+
+\paragraph{Protocol.}
+Each condition is trained for $10^6$ steps on a uniform B-line/Meander mixture
+with ten seeds (five for the $\beta$ sweep). Each trained stochastic policy is
+evaluated for 100 episodes per attacker, including the held-out Stealthy
+attacker. Evaluation episode $i$ uses the same seed for every policy, and the
+red, green and detection processes draw from independent random streams, so
+comparisons use \emph{common random numbers} \citep{law2015simulation}. For RQ3
+we additionally deploy the unshielded policies with the shield attached
+(``+S''). We report seed-level means with 95\% percentile-bootstrap CIs and
+IQM \citep{agarwal2021precipice,henderson2018matters}; pre-registered
+comparisons use Mann--Whitney U tests on seed means and, against the
+playbook, Wilcoxon signed-rank tests on CRN-paired episodes, all
+Holm-corrected. The full protocol is in the artefact
+(\texttt{docs/methodology.md}).
+
+% ----------------------------------------------------------------------------
+\section{Results}
+% ----------------------------------------------------------------------------
+\IfFileExists{tables/main.tex}{\input{tables/main.tex}}{\todo{run scripts/analyze.py}}
+
+\begin{figure}[t]
+\centering
+\IfFileExists{figures/pareto.pdf}{\includegraphics[width=0.62\linewidth]{figures/pareto.pdf}}{\todo{pareto figure}}
+\caption{Security return versus normalised collateral harm (log scale) under
+the training distribution; hollow markers indicate hard-constraint violations.}
+\label{fig:pareto}
+\end{figure}
+
+\begin{figure}[t]
+\centering
+\IfFileExists{figures/learning.pdf}{\includegraphics[width=\linewidth]{figures/learning.pdf}}{\todo{learning curves}}
+\caption{Training dynamics (mean and 10--90\% band over seeds). Dashed lines
+are budgets. The right panel counts hard violations committed \emph{during
+training} (log scale).}
+\label{fig:learning}
+\end{figure}
+
+\paragraph{RQ1: The cost of maximising reward.} \todo{fill from tables/main.tex and figures/shaping.pdf}
+
+\paragraph{RQ2: Typed versus untyped constraints.} \todo{fill; cite tests.csv}
+
+\paragraph{RQ3: Shield during training or only at deployment?} \todo{fill from tables/ablation.tex}
+
+\paragraph{RQ4: Held-out attacker.} \todo{fill from tables/ood.tex}
+
+% ----------------------------------------------------------------------------
+\section{Discussion and Threats to Validity}
+% ----------------------------------------------------------------------------
+\paragraph{Implications.} \todo{after results}
+
+\paragraph{Threats.}
+\emph{Internal:} hyper-parameters were shared, not tuned per condition; the
+$\beta$ sweep bounds the effect of tuning the shaping baseline.
+\emph{Construct:} downtime and traffic are proxies, and evidence is modelled
+as a binary per-incident property, whereas real artefacts are graded by
+volatility \citep{rfc3227}. \emph{External:} one 12-host topology with
+scripted attackers; our claims concern safety \emph{mechanisms}, not
+deployment-ready agents; porting the cost channels to CybORG/CAGE-4 is future
+work. \emph{Conclusion:} ten seeds, CRN pairing, bootstrap CIs and Holm
+correction; near-zero violation rates are reported with exact binomial upper
+bounds.
+
+% ----------------------------------------------------------------------------
+\section{Conclusion}
+% ----------------------------------------------------------------------------
+\todo{3--4 sentences after results}
+
+\paragraph{Artefact availability.} Simulator, agents, configuration, raw
+evaluation records and analysis scripts: \todo{anonymised repository / Zenodo DOI}.
+
+\bibliographystyle{plainnat}
+\bibliography{refs}
+\end{document}
