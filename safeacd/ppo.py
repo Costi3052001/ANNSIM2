@@ -29,8 +29,10 @@ import numpy as np
 import torch
 import torch.nn as nn
 
-from .env import (BUDGET_CHANNELS, COST_NAMES, HARD_CHANNELS, N_ACTIONS,
-                  N_COSTS, OBS_DIM, EnvConfig, SafeACDEnv)
+from .env import (BUDGET_CHANNELS, COST_NAMES, ENT2, N_ACTIONS, N_COSTS,
+                  N_HOST_ACTION_TYPES, N_HOSTS, N_LINKS, OBS_DIM, OBS_PER_HOST,
+                  OP_HOSTS, OP_SERVER, PROD_WEIGHT, SEC_VALUE, USERS,
+                  EnvConfig, SafeACDEnv)
 from .shield import Shield
 
 METHODS = ("ppo", "shaped", "lag", "shield", "typed")
@@ -52,11 +54,12 @@ class TrainConfig:
     ent_coef: float = 0.01
     vf_coef: float = 0.5
     max_grad_norm: float = 0.5
-    hidden: int = 256
+    hidden: int = 64
+    arch: str = "entity"           # "entity" (host-shared) or "mlp"
     reward_scale: float = 0.1
     # Constraint thresholds per episode: prod, traffic, evidence, critical.
     budgets: tuple = (10.0, 50.0, 0.0, 0.0)
-    lagrange_lr: float = 0.05      # Adam step size for the dual variables
+    lagrange_lr: float = 0.05      # dual step size (per PPO update)
     lagrange_init: float = 0.0
     # Reward-shaping baseline: r' = r - beta * sum_k u_k c_k.
     shaping_beta: float = 1.0
@@ -101,47 +104,126 @@ def _mlp(inp, out, hidden, out_gain):
     return nn.Sequential(*layers)
 
 
-class ActorCritic(nn.Module):
-    """Separate actor and multi-head critic (1 reward head + one per cost)."""
+class MLPActorCritic(nn.Module):
+    """Flat baseline: separate actor and multi-head critic MLPs."""
 
     def __init__(self, hidden=256):
         super().__init__()
         self.actor = _mlp(OBS_DIM, N_ACTIONS, hidden, 0.01)
         self.critic = _mlp(OBS_DIM, 1 + N_COSTS, hidden, 1.0)
 
-    def dist(self, obs, mask):
-        logits = self.actor(obs)
-        logits = torch.where(mask, logits, torch.full_like(logits, -1e9))
-        return torch.distributions.Categorical(logits=logits)
+    def logits(self, obs):
+        return self.actor(obs)
 
     def values(self, obs):
         return self.critic(obs)
 
 
-# --------------------------------------------------------------------------- #
-class DualAdam:
-    """Projected dual ascent on the Lagrange multipliers with Adam step sizes.
+def _host_static_features():
+    f = np.zeros((N_HOSTS, 7), dtype=np.float32)
+    for h in range(N_HOSTS):
+        f[h, 0] = h in USERS
+        f[h, 1] = h in (5, 6)
+        f[h, 2] = h == ENT2
+        f[h, 3] = h == OP_SERVER
+        f[h, 4] = h in OP_HOSTS
+    f[:, 5] = SEC_VALUE
+    f[:, 6] = PROD_WEIGHT / 2.0
+    return f
 
-    lambda_k <- max(0, lambda_k + lr * Adam(J_k - d_k)), as in OmniSafe's
-    PPO-Lagrangian.  Adam bounds the per-update change of lambda, avoiding the
-    overshoot of plain gradient ascent when early costs are far above budget.
+
+def _lin(i, o, gain=np.sqrt(2)):
+    l = nn.Linear(i, o)
+    nn.init.orthogonal_(l.weight, gain)
+    nn.init.zeros_(l.bias)
+    return l
+
+
+class _EntityTrunk(nn.Module):
+    """Shared per-host encoder + permutation-invariant global context."""
+
+    def __init__(self, hidden):
+        super().__init__()
+        self.register_buffer("static", torch.as_tensor(_host_static_features()))
+        d_in = OBS_PER_HOST + self.static.shape[1]
+        self.enc = nn.Sequential(_lin(d_in, hidden), nn.Tanh(), _lin(hidden, hidden), nn.Tanh())
+        self.ctx = nn.Sequential(_lin(2 * hidden + N_LINKS + 1, hidden), nn.Tanh())
+
+    def forward(self, obs):
+        b = obs.shape[0]
+        hosts = obs[:, :N_HOSTS * OBS_PER_HOST].reshape(b, N_HOSTS, OBS_PER_HOST)
+        glob = obs[:, N_HOSTS * OBS_PER_HOST:]
+        x = torch.cat([hosts, self.static.expand(b, -1, -1)], dim=-1)
+        e = self.enc(x)                                            # (B, H, d)
+        c = self.ctx(torch.cat([e.mean(1), e.max(1).values, glob], dim=-1))  # (B, d)
+        return e, c
+
+
+class EntityActorCritic(nn.Module):
+    """Host-shared ("entity-based") actor-critic.
+
+    Per-host action logits come from one network applied to every host, so a
+    rule such as "privileged ticket and valid image -> Restore" is learned once
+    rather than twelve times (cf. Symes Thompson et al. 2024).  Global actions
+    (Sleep, Block/Unblock) are read from the pooled context.
     """
 
-    def __init__(self, n, lr, init, mask, b1=0.9, b2=0.999, eps=1e-8):
-        self.lr, self.b1, self.b2, self.eps = lr, b1, b2, eps
-        self.mask = mask
-        self.lam = np.where(mask, init, 0.0).astype(float)
-        self.m = np.zeros(n)
-        self.v = np.zeros(n)
-        self.t = 0
+    def __init__(self, hidden=128):
+        super().__init__()
+        self.a_trunk = _EntityTrunk(hidden)
+        self.a_host = nn.Sequential(_lin(2 * hidden, hidden), nn.Tanh(),
+                                    _lin(hidden, N_HOST_ACTION_TYPES, 0.01))
+        self.a_glob = nn.Sequential(_lin(hidden, hidden), nn.Tanh(),
+                                    _lin(hidden, 1 + 2 * N_LINKS, 0.01))
+        self.c_trunk = _EntityTrunk(hidden)
+        self.c_head = nn.Sequential(_lin(hidden, hidden), nn.Tanh(), _lin(hidden, 1 + N_COSTS, 1.0))
 
-    def step(self, grad):
-        self.t += 1
-        self.m = self.b1 * self.m + (1 - self.b1) * grad
-        self.v = self.b2 * self.v + (1 - self.b2) * grad ** 2
-        m_hat = self.m / (1 - self.b1 ** self.t)
-        v_hat = self.v / (1 - self.b2 ** self.t)
-        self.lam = np.where(self.mask, np.maximum(0.0, self.lam + self.lr * m_hat / (np.sqrt(v_hat) + self.eps)), 0.0)
+    def logits(self, obs):
+        e, c = self.a_trunk(obs)
+        h = self.a_host(torch.cat([e, c[:, None, :].expand_as(e)], dim=-1))  # (B, H, K)
+        host_logits = h.transpose(1, 2).reshape(obs.shape[0], -1)          # kind-major
+        g = self.a_glob(c)                                                 # Sleep, Block.., Unblock..
+        return torch.cat([g[:, :1], host_logits, g[:, 1:]], dim=-1)
+
+    def values(self, obs):
+        _, c = self.c_trunk(obs)
+        return self.c_head(c)
+
+
+def make_actor_critic(arch: str, hidden: int) -> nn.Module:
+    if arch == "entity":
+        return EntityActorCritic(hidden)
+    if arch == "mlp":
+        return MLPActorCritic(hidden)
+    raise ValueError(arch)
+
+
+def masked_dist(ac, obs, mask):
+    logits = ac.logits(obs)
+    logits = torch.where(mask, logits, torch.full_like(logits, -1e9))
+    return torch.distributions.Categorical(logits=logits)
+
+
+# --------------------------------------------------------------------------- #
+class DualAscent:
+    """Projected dual ascent on the Lagrange multipliers.
+
+    lambda_k <- max(0, lambda_k + lr * clip((J_k - d_k) / max(d_k, 1), -1, 1)).
+
+    Normalising by the budget makes channels comparable; clipping bounds the
+    per-update change so that a large early violation cannot drive lambda far
+    above its equilibrium (the overshoot that PID-Lagrangian methods address,
+    Stooke et al. 2020), and lambda decays as fast as it grows once the
+    constraint is slack.
+    """
+
+    def __init__(self, n, lr, init, mask, clip=1.0):
+        self.lr, self.clip, self.mask = lr, clip, mask
+        self.lam = np.where(mask, init, 0.0).astype(float)
+
+    def step(self, norm_violation):
+        g = np.clip(norm_violation, -self.clip, self.clip)
+        self.lam = np.where(self.mask, np.maximum(0.0, self.lam + self.lr * g), 0.0)
         return self.lam
 
 
@@ -195,13 +277,13 @@ def train(cfg: TrainConfig, verbose: bool = True) -> Path:
     env_cfg = EnvConfig(attackers=tuple(cfg.attackers), **cfg.env)
     shield = Shield() if use_shield else None
     venv = VecEnv(cfg.n_envs, env_cfg, cfg.seed, shield)
-    ac = ActorCritic(cfg.hidden)
+    ac = make_actor_critic(cfg.arch, cfg.hidden)
     opt = torch.optim.Adam(ac.parameters(), lr=cfg.lr, eps=1e-5)
 
     budgets = np.asarray(cfg.budgets, dtype=float)
     lam_mask = np.zeros(N_COSTS, dtype=bool)
     lam_mask[list(lag_ch)] = True
-    dual = DualAdam(N_COSTS, cfg.lagrange_lr, cfg.lagrange_init, lam_mask)
+    dual = DualAscent(N_COSTS, cfg.lagrange_lr, cfg.lagrange_init, lam_mask)
     lam = dual.lam
     shaping_u = np.asarray(cfg.shaping_u, dtype=float)
 
@@ -237,7 +319,7 @@ def train(cfg: TrainConfig, verbose: bool = True) -> Path:
             mask = venv.masks()
             with torch.no_grad():
                 ot = torch.as_tensor(obs)
-                d = ac.dist(ot, torch.as_tensor(mask))
+                d = masked_dist(ac, ot, torch.as_tensor(mask))
                 a = d.sample()
                 logp = d.log_prob(a)
                 v = ac.values(ot)
@@ -290,7 +372,7 @@ def train(cfg: TrainConfig, verbose: bool = True) -> Path:
             np.random.shuffle(idx)
             for s in range(0, T * N, cfg.minibatch):
                 mb = torch.as_tensor(idx[s:s + cfg.minibatch])
-                d = ac.dist(b_obs[mb], b_mask[mb])
+                d = masked_dist(ac, b_obs[mb], b_mask[mb])
                 logp = d.log_prob(b_act[mb])
                 ratio = torch.exp(logp - b_logp[mb])
                 adv_mb = b_adv[mb]
@@ -333,7 +415,7 @@ class TrainedPolicy:
     def __init__(self, path, use_shield: bool | None = None, greedy: bool = False, seed: int = 0):
         ck = torch.load(Path(path) / "model.pt", weights_only=False)
         self.cfg = ck["config"]
-        self.ac = ActorCritic(self.cfg["hidden"])
+        self.ac = make_actor_critic(self.cfg.get("arch", "mlp"), self.cfg["hidden"])
         self.ac.load_state_dict(ck["model"])
         self.ac.eval()
         trained_shield, _, _ = method_flags(self.cfg["method"])
@@ -350,7 +432,7 @@ class TrainedPolicy:
         if self.shield is not None:
             m = m & self.shield.safe_mask(env)
         with torch.no_grad():
-            d = self.ac.dist(torch.as_tensor(env._obs())[None], torch.as_tensor(m)[None])
+            d = masked_dist(self.ac, torch.as_tensor(env._obs())[None], torch.as_tensor(m)[None])
             if self.greedy:
                 return int(d.probs.argmax())
             return int(torch.multinomial(d.probs, 1, generator=self.gen).item())

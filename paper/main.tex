@@ -16,6 +16,8 @@
 \usepackage[numbers,sort&compress]{natbib}
 \usepackage[hidelinks]{hyperref}
 \usepackage{enumitem}
+\usepackage{tikz}
+\usetikzlibrary{arrows.meta,positioning,fit}
 \setlist{nosep,leftmargin=*}
 
 \newcommand{\safeacd}{\textsc{SafeACD-Sim}}
@@ -175,8 +177,8 @@ $\Pr_\pi[\sum_t c_k>0]=0$.
 \max_\pi \min_{\lambda\ge 0}\; J_r(\pi)-\sum_{k\in\mathcal{B}}\lambda_k\bigl(J_{c_k}(\pi)-d_k\bigr),
 \end{equation}
 using PPO \citep{schulman2017ppo} on the normalised combined advantage
-$(A_r-\sum_k\lambda_k A_{c_k})/(1+\sum_k\lambda_k)$ and projected Adam ascent on
-$\lambda$ (as in OmniSafe \citep{ji2024omnisafe}), and enforces the hard part
+$(A_r-\sum_k\lambda_k A_{c_k})/(1+\sum_k\lambda_k)$ as in OmniSafe
+\citep{ji2024omnisafe} and projected dual ascent on $\lambda$ (Section~5), and enforces the hard part
 with a preemptive shield that masks unsafe actions before sampling:
 \begin{itemize}
 \item[\textbf{H1}] \emph{Image before reimage:} \textsf{Restore}$(h)$ is
@@ -184,6 +186,28 @@ allowed only if a forensic image of $h$ exists that post-dates the host's open
 SOC ticket and its last reimage.
 \item[\textbf{H2}] \emph{Never sever the OT controller:} \textsf{Isolate}(OpServer) is never allowed.
 \end{itemize}
+
+\begin{figure}[t]
+\centering
+\begin{tikzpicture}[font=\footnotesize, >=Latex,
+  box/.style={draw, rounded corners=2pt, align=center, minimum height=8mm, inner sep=3pt},
+  hard/.style={box, fill=orange!12}, soft/.style={box, fill=blue!8}]
+\node[box, minimum width=30mm] (sim) {\safeacd{}\\[-1pt]\scriptsize red / green / detection processes};
+\node[box, right=14mm of sim, minimum width=26mm] (pol) {Entity actor--critic\\[-1pt]\scriptsize per-host logits + context};
+\node[hard, right=10mm of pol, minimum width=24mm] (sh) {Shield (hard)\\[-1pt]\scriptsize H1 image$\to$reimage\\[-2pt]\scriptsize H2 never isolate OpServer};
+\node[soft, below=7mm of pol, minimum width=26mm] (lag) {Dual ascent (budgets)\\[-1pt]\scriptsize $\lambda_{\text{prod}},\lambda_{\text{traf}}$};
+\draw[->] (sim) -- node[above]{\scriptsize SOC obs.} (pol);
+\draw[->] (pol) -- node[above]{\scriptsize logits} (sh);
+\draw[->] (sh.north) -- ++(0,5mm) -| node[pos=0.25, above]{\scriptsize safe action} (sim.north);
+\draw[->] (sim.south) |- node[pos=0.75, below]{\scriptsize $c_{\text{prod}}, c_{\text{traf}}$} (lag.west);
+\draw[->] (lag) -- node[right]{\scriptsize $\lambda$} (pol);
+\draw[->, dashed] (sim.south west) ++(3mm,0) -- ++(0,-14mm) node[below, align=center]{\scriptsize $r$ (security only) $\to$ $A_r$;\ $c_{\text{evid}}, c_{\text{crit}}$ logged as audit};
+\end{tikzpicture}
+\caption{\typed{} agent in the loop. Budget harms are priced by Lagrange
+multipliers; hard harms are prevented by a preemptive shield that reads only
+SOC-observable state. All four harm channels are logged for every method.}
+\label{fig:arch}
+\end{figure}
 
 \paragraph{Monitor-relative guarantees.}
 The shield reads only what a SOC has---tickets and image timestamps---never
@@ -292,9 +316,15 @@ SOC playbook (image before reimage) & $-78.8$ & 12.5 & 52.4 & $-13.3$ & 3.2 & 31
 \paragraph{Conditions.}
 All learning conditions share one PPO implementation and hyper-parameters
 (8 environments $\times$ 256 steps, 10 epochs, minibatch 256, learning rate
-$3\cdot10^{-4}$, $\gamma=0.99$, GAE $\lambda=0.95$, clip 0.2, entropy 0.01,
-tanh MLPs 256--256, critic with one reward and four cost heads); they differ
-only in safety handling: \textbf{PPO} (security reward only);
+$3\cdot10^{-4}$, $\gamma=0.99$, GAE $\lambda=0.95$, clip 0.2, entropy 0.01)
+and one \emph{entity-based} actor--critic \citep{symesthompson2024entity}: a
+64-unit encoder shared by all hosts, a permutation-invariant pooled context,
+a per-host head producing that host's six action logits, a global head for
+\textsf{Sleep}/\textsf{Block}/\textsf{Unblock}, and a critic with one reward
+and four cost heads. Lagrange multipliers follow clipped, budget-normalised
+projected ascent, $\lambda_k\leftarrow\max\bigl(0,\lambda_k+0.05\,\mathrm{clip}((J_k-d_k)/\max(d_k,1),-1,1)\bigr)$,
+which bounds overshoot in both directions \citep{stooke2020pid}. Conditions
+differ only in safety handling: \textbf{PPO} (security reward only);
 \textbf{Shaped}-$\beta$ (reward minus $\beta(c_{\text{prod}}+c_{\text{traf}}+10c_{\text{evid}}+10c_{\text{crit}})$, $\beta=1$
 in the main grid, $\beta\in\{0.1,0.3,3,10\}$ in a sweep); \textbf{Lag} (PPO-Lagrangian
 on all four channels with $d=(10,50,0,0)$); \textbf{Shield} (security reward
@@ -305,7 +335,7 @@ and traffic cost under the training distribution are 7.9 and 41.7.
 
 \paragraph{Protocol.}
 Each condition is trained for $10^6$ steps on a uniform B-line/Meander mixture
-with ten seeds (five for the $\beta$ sweep). Each trained stochastic policy is
+with independent seeds (seed 0 was reserved for pilot runs; \todo{update seed count: 5 executed, 10 planned}; three for the $\beta$ sweep). Each trained stochastic policy is
 evaluated for 100 episodes per attacker, including the held-out Stealthy
 attacker. Evaluation episode $i$ uses the same seed for every policy, and the
 red, green and detection processes draw from independent random streams, so

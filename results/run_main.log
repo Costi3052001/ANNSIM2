@@ -1,0 +1,5 @@
+37 runs, 4 parallel jobs
+[shaped-b1_s1] upd 20/488 steps 40960 R   -830.4 prod   24.6 traf  175.8 evid    5.4 crit    0.0 lam 0.00,0.00,0.00,0.00 (59s)
+[ppo_s1] upd 20/488 steps 40960 R    -33.3 prod  618.4 traf 1471.9 evid   13.7 crit   93.8 lam 0.00,0.00,0.00,0.00 (59s)
+[shield_s1] upd 20/488 steps 40960 R    -83.1 prod  280.9 traf 1010.7 evid    0.1 crit    0.0 lam 0.00,0.00,0.00,0.00 (61s)
+[lag_s1] upd 20/488 steps 40960 R   -257.0 prod   75.2 traf  480.3 evid   18.1 crit    1.7 lam 1.00,1.00,1.00,1.00 (63s)

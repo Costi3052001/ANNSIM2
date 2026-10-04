@@ -19,13 +19,15 @@ def build_runs(cfg, only=None):
     common = dict(total_steps=tr["total_steps"], attackers=tuple(tr["attackers"]),
                   budgets=tuple(tr["budgets"]), out_dir=cfg["out_dir"], **tr.get("overrides", {}))
     runs = []
-    for m in tr["methods"]:
-        for s in tr["seeds"]:
+    # Seed-major order: every method finishes seed k before any starts seed k+1,
+    # so a partially completed grid is still balanced across methods.
+    for s in tr["seeds"]:
+        for m in tr["methods"]:
             runs.append(TrainConfig(method=m, seed=s, shaping_beta=tr["shaping_beta"], **common))
     sw = cfg.get("shaping_sweep")
     if sw:
-        for b in sw["betas"]:
-            for s in sw["seeds"]:
+        for s in sw["seeds"]:
+            for b in sw["betas"]:
                 runs.append(TrainConfig(method="shaped", seed=s, shaping_beta=b, **common))
     if only:
         runs = [r for r in runs if r.method in only]

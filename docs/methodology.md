@@ -193,19 +193,37 @@ channels have d = 0.
 **Shared hyper-parameters** (not tuned per method):
 - **PPO:** 8 envs × 256 steps; 10 epochs; minibatch 256; lr 3e-4; γ 0.99;
   GAE λ 0.95; clip 0.2; entropy 0.01; grad-norm 0.5.
-- **Networks:** separate tanh-MLP actor and critic (256-256). The critic has
-  1 + 4 heads (reward + one per cost).
-- **Lagrangian:** multipliers updated once per rollout by projected Adam
-  ascent on (J_k − d_k)/max(d_k, 1), lr 0.05. The combined advantage is
-  (A_r − Σλ_k A_k)/(1 + Σλ_k), as in OmniSafe.
+- **Network: entity-based (host-shared) actor-critic.**
+  - One 2-layer tanh encoder (64 units) is applied to every host's 7
+    observed and 7 static features.
+  - A permutation-invariant context (mean- and max-pool, plus link state and
+    time) feeds a per-host head (6 logits per host) and a global head (Sleep,
+    Block/Unblock).
+  - The critic has the same structure with separate weights and 1 + 4 value
+    heads.
+  - This follows Symes Thompson et al. (AutonomousCyber@CCS 2024).
+- **Lagrangian:** multipliers updated once per rollout by projected dual
+  ascent, λ ← max(0, λ + 0.05·clip((J − d)/max(d, 1), −1, 1)). The combined
+  advantage is (A_r − Σλ_k A_k)/(1 + Σλ_k), as in OmniSafe.
 - **Invalid-action masking** is applied to every method. Safety masking
   applies only to shielded ones.
 
-**Pilot finding to report.** With plain gradient ascent on λ, the
-multipliers overshot to about 10 in the first 20 updates. The agent became
-passive and recovered slowly (the PID-Lagrangian motivation of Stooke et al.).
-The Adam-based dual update removes this. One seed, documented, then fixed
-before the main runs.
+**Pilot findings to report (all on seed 0, which is excluded from the main
+grid).**
+1. **Architecture.** A flat 256-256 MLP did not learn ticket-conditional
+   behaviour within 0.8 M steps. It sprayed `Remove` over hosts, and the
+   Typed agent never used `Restore`. The host-shared architecture learns the
+   rule once for all hosts and fixed this for every method.
+2. **Dual dynamics.** Plain gradient ascent on λ overshot to about 10 within
+   20 updates and made agents passive. Adam on λ (as in OmniSafe) removed the
+   overshoot, but its long second-moment memory made λ decay very slowly once
+   costs were under budget. Typed stayed over-conservative at R ≈ −555.
+   Clipped, budget-normalised ascent bounds the step size in both
+   directions (cf. PID-Lagrangian, Stooke et al. 2020).
+3. **Early segmentation phase.** Shielded agents first learn to block the
+   enterprise→OT link, which costs about 4× the traffic budget. They switch
+   to "image → reimage" only after λ_traffic grows. Report this as an
+   observed cost of the shield during learning.
 
 ---
 
@@ -213,6 +231,8 @@ before the main runs.
 
 **Training.**
 - 1 M environment steps per run (10,000 episodes).
+- Seeds 1–10 (seed 0 was used only for pilots). The first execution ran
+  seeds 1–5, seed-major. `run_experiments.py` resumes and adds seeds 6–10.
 - The training attacker is a uniform B-line/Meander mixture.
 - Main grid: 5 methods × 10 seeds = 50 runs.
 - β-sweep for `shaped`: β ∈ {0.1, 0.3, 3, 10} × 5 seeds = 20 runs. β = 1
@@ -286,9 +306,11 @@ cd paper && latexmk -pdf main.tex
 ```
 
 **Compute.**
-- One 1M-step run takes about 15–20 min on one CPU core.
-- The full protocol (70 runs) takes about 5–6 h on 4 cores. Evaluation
-  takes about 20 min.
+- One 1M-step run takes about 20–25 min on one CPU core (4 runs in
+  parallel on a 4-core machine).
+- Seeds 1–5 plus the β-sweep is 37 runs, about 3.5 h on 4 cores.
+- The full protocol (seeds 1–10) is 62 runs, about 6 h. Evaluation takes
+  about 20 min.
 - No GPU is needed.
 
 **Smoke test** (about 3 min):
@@ -304,8 +326,9 @@ the evaluation and analysis steps with `--episodes 5`.
     confounds.
   - Hyper-parameters were not tuned per method. Shaped could improve with
     tuning, and the β-sweep partly addresses this.
-  - The pilots used seed 0, which is also in the main grid. Disclose this, or
-    use seeds 1–10 for the main grid.
+  - Design choices (architecture, dual step) were made on seed-0 pilots of
+    Typed and Lag, and applied to all methods. Seed 0 is excluded from the
+    reported results.
 - **Construct.**
   - Costs are proxies: downtime in host-steps and traffic in flow-weights.
   - "Evidence" is binary per incident. Real forensics is graded (volatile vs
@@ -336,8 +359,16 @@ the evaluation and analysis steps with `--episodes 5`.
 ---
 
 ## 10. Change log
-- 2026-10-04:
-  - Fixed artefacts: random initial foothold; usable-foothold re-phishing;
-    incident-scoped evidence.
-  - Switched the dual update to Adam after a pilot showed λ overshoot.
-  - All pilots used seed 0 only. The main grid has not been run yet.
+- 2026-10-04 (before the main grid):
+  - Simulator fixes:
+    - random initial foothold;
+    - usable-foothold re-phishing;
+    - incident-scoped evidence;
+    - faster `valid_mask`/`feasible_exploits`, with identical trajectories
+      verified by a hash.
+  - Learner changes:
+    - entity-based actor-critic (hidden 64);
+    - clipped normalised dual ascent;
+    - main-grid seeds 1–10 (seed 0 is reserved for pilots).
+  - Pilots (seed 0): plain-SGD dual → Adam dual → clipped dual; flat MLP →
+    entity network. See §4.
