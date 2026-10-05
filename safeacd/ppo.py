@@ -11,7 +11,15 @@ shaped         security - b*u.c    --                no
 lag            security            all 4 channels    no
 shield         security            --                yes (H1, H2)
 typed          security            budget channels   yes (H1, H2)
+lag-fast       security            all 4 channels    no   (hard-channel multipliers 10x faster, uncapped)
+lag-pid        security            all 4 channels    no   (PID-Lagrangian, Stooke et al. 2020)
 =============  ==================  ================  ==================
+
+``lag-fast`` and ``lag-pid`` are stronger Lagrangian baselines.  In ``lag`` the
+clipped dual step bounds lambda's growth to ``lagrange_lr`` per update; the
+evidence multiplier grew at that maximum rate throughout training, so these two
+variants test whether the Lagrangian's hard-constraint violations are an
+artefact of that rate limit.
 
 ``typed`` is the proposed constraint-type-aware design: hard, irreversible
 constraints are enforced by the shield; budget constraints by Lagrangian
@@ -29,13 +37,13 @@ import numpy as np
 import torch
 import torch.nn as nn
 
-from .env import (BUDGET_CHANNELS, COST_NAMES, ENT2, N_ACTIONS, N_COSTS,
+from .env import (BUDGET_CHANNELS, COST_NAMES, ENT2, HARD_CHANNELS, N_ACTIONS, N_COSTS,
                   N_HOST_ACTION_TYPES, N_HOSTS, N_LINKS, OBS_DIM, OBS_PER_HOST,
                   OP_HOSTS, OP_SERVER, PROD_WEIGHT, SEC_VALUE, USERS,
                   EnvConfig, SafeACDEnv)
 from .shield import Shield
 
-METHODS = ("ppo", "shaped", "lag", "shield", "typed")
+METHODS = ("ppo", "shaped", "lag", "shield", "typed", "lag-fast", "lag-pid")
 
 
 @dataclass
@@ -61,6 +69,10 @@ class TrainConfig:
     budgets: tuple = (10.0, 50.0, 0.0, 0.0)
     lagrange_lr: float = 0.05      # dual step size (per PPO update)
     lagrange_init: float = 0.0
+    lagrange_lr_hard_fast: float = 0.5   # lag-fast: step for evidence/critical, no clipping
+    pid_kp: float = 1.0                  # lag-pid gains (on budget-normalised violation)
+    pid_ki: float = 0.05
+    pid_kd: float = 0.5
     # Reward-shaping baseline: r' = r - beta * sum_k u_k c_k.
     shaping_beta: float = 1.0
     shaping_u: tuple = (1.0, 1.0, 10.0, 10.0)
@@ -90,6 +102,8 @@ def method_flags(method: str):
         return True, (), False
     if method == "typed":
         return True, BUDGET_CHANNELS, False
+    if method in ("lag-fast", "lag-pid"):
+        return False, tuple(range(N_COSTS)), False
     raise ValueError(method)
 
 
@@ -218,13 +232,53 @@ class DualAscent:
     """
 
     def __init__(self, n, lr, init, mask, clip=1.0):
-        self.lr, self.clip, self.mask = lr, clip, mask
+        # lr and clip may be scalars or per-channel arrays (np.inf = unclipped).
+        self.lr = np.broadcast_to(np.asarray(lr, dtype=float), (n,))
+        self.clip = np.broadcast_to(np.asarray(clip, dtype=float), (n,))
+        self.mask = mask
         self.lam = np.where(mask, init, 0.0).astype(float)
 
     def step(self, norm_violation):
         g = np.clip(norm_violation, -self.clip, self.clip)
         self.lam = np.where(self.mask, np.maximum(0.0, self.lam + self.lr * g), 0.0)
         return self.lam
+
+
+class PIDDual:
+    """PID Lagrangian (Stooke, Achiam & Abbeel, ICML 2020).
+
+    lambda = max(0, Kp*e + Ki*I + Kd*max(0, e - e_prev)),  I <- max(0, I + clip(e, -1, 1)),
+    with e = (J - d) / max(d, 1).  The proportional term reacts immediately to
+    the current violation (no growth-rate cap); the integral uses clipped input
+    as anti-windup so early, very large violations do not leave lambda stuck high.
+    """
+
+    def __init__(self, n, kp, ki, kd, mask):
+        self.kp, self.ki, self.kd, self.mask = kp, ki, kd, mask
+        self.I = np.zeros(n)
+        self.prev = np.zeros(n)
+        self.lam = np.zeros(n)
+
+    def step(self, norm_violation):
+        e = np.asarray(norm_violation, dtype=float)
+        self.I = np.maximum(0.0, self.I + np.clip(e, -1.0, 1.0))
+        d = np.maximum(0.0, e - self.prev)
+        self.prev = e
+        lam = np.maximum(0.0, self.kp * e + self.ki * self.I + self.kd * d)
+        self.lam = np.where(self.mask, lam, 0.0)
+        return self.lam
+
+
+def make_dual(cfg, mask):
+    if cfg.method == "lag-pid":
+        return PIDDual(N_COSTS, cfg.pid_kp, cfg.pid_ki, cfg.pid_kd, mask)
+    if cfg.method == "lag-fast":
+        hard = np.zeros(N_COSTS, dtype=bool)
+        hard[list(HARD_CHANNELS)] = True
+        lr = np.where(hard, cfg.lagrange_lr_hard_fast, cfg.lagrange_lr)
+        clip = np.where(hard, np.inf, 1.0)
+        return DualAscent(N_COSTS, lr, cfg.lagrange_init, mask, clip)
+    return DualAscent(N_COSTS, cfg.lagrange_lr, cfg.lagrange_init, mask)
 
 
 # --------------------------------------------------------------------------- #
@@ -283,7 +337,7 @@ def train(cfg: TrainConfig, verbose: bool = True) -> Path:
     budgets = np.asarray(cfg.budgets, dtype=float)
     lam_mask = np.zeros(N_COSTS, dtype=bool)
     lam_mask[list(lag_ch)] = True
-    dual = DualAscent(N_COSTS, cfg.lagrange_lr, cfg.lagrange_init, lam_mask)
+    dual = make_dual(cfg, lam_mask)
     lam = dual.lam
     shaping_u = np.asarray(cfg.shaping_u, dtype=float)
 

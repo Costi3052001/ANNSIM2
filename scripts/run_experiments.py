@@ -35,11 +35,18 @@ def build_runs(cfg, only=None):
 
 
 def _job(tc: TrainConfig):
+    """Train one run; never raises, so one failure cannot stop the queue."""
     done = Path(tc.out_dir) / tc.run_name / "model.pt"
     if done.exists():
         return f"skip {tc.run_name}"
-    train(tc, verbose=True)
-    return f"done {tc.run_name}"
+    try:
+        train(tc, verbose=True)
+        return f"done {tc.run_name}"
+    except Exception as e:  # noqa: BLE001 - log and continue with the rest of the queue
+        import traceback
+        with open(Path(tc.out_dir).parent / "failed_runs.log", "a") as f:
+            f.write(f"=== {tc.run_name}: {e!r}\n{traceback.format_exc()}\n")
+        return f"FAILED {tc.run_name}: {e!r}"
 
 
 def main():
@@ -59,9 +66,13 @@ def main():
             cfg["shaping_sweep"]["seeds"] = [s for s in cfg["shaping_sweep"]["seeds"] if s in args.seeds]
     runs = build_runs(cfg, args.only)
     print(f"{len(runs)} runs, {args.jobs} parallel jobs", flush=True)
+    n_failed = 0
     with Pool(args.jobs) as pool:
         for msg in pool.imap_unordered(_job, runs):
             print(msg, flush=True)
+            n_failed += msg.startswith("FAILED")
+    print(f"finished: {len(runs) - n_failed}/{len(runs)} runs ok, {n_failed} failed", flush=True)
+    sys.exit(1 if n_failed else 0)
 
 
 if __name__ == "__main__":

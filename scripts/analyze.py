@@ -35,8 +35,10 @@ STYLE = {
     "shield":      dict(c="#eda100", m="D", ls=":",  label="PPO+Shield"),
     "ppo":         dict(c="#e87ba4", m="v", ls=(0, (5, 1)), label="PPO (reward only)"),
     "playbook":    dict(c="#008300", m="P", ls="-",  label="SOC playbook"),
+    "lag-fast":    dict(c="#4a3aa7", m="X", ls=(0, (3, 1, 1, 1)), label="PPO-Lag, fast hard $\\lambda$"),
+    "lag-pid":     dict(c="#e34948", m="*", ls=(0, (1, 1)), label="PID-Lagrangian"),
 }
-MAIN_ORDER = ["playbook", "ppo", "shaped-b1", "lag", "shield", "typed"]
+MAIN_ORDER = ["playbook", "ppo", "shaped-b1", "lag", "lag-fast", "lag-pid", "shield", "typed"]
 ABLATION = ["ppo+S", "shaped-b1+S", "lag+S"]
 NICE = {k: v["label"] for k, v in STYLE.items()}
 NICE.update({"ppo+S": "PPO, shield at deploy", "lag+S": "PPO-Lag, shield at deploy",
@@ -94,14 +96,15 @@ def final_lambdas(run_root):
     acc = {}
     for p in Path(run_root).glob("*/train_log.csv"):
         cfg = json.load(open(p.parent / "config.json"))
-        if cfg["method"] not in ("lag", "typed") or not (p.parent / "model.pt").exists():
+        if cfg["method"] not in ("lag", "typed", "lag-fast", "lag-pid") or not (p.parent / "model.pt").exists():
             continue
         last = pd.read_csv(p).iloc[-1]
         for ch in COSTS:
             acc.setdefault((cfg["method"], ch), []).append(last[f"lambda_{ch}"])
     out = {}
     for (m, ch), v in acc.items():
-        out[f"lamFinal{m.capitalize()}{ch.capitalize()}"] = f"{np.mean(v):.1f}"
+        mk = "".join(c for c in m if c.isalpha()).capitalize()
+        out[f"lamFinal{mk}{ch.capitalize()}"] = f"{np.mean(v):.1f}"
     return out
 
 
@@ -163,7 +166,8 @@ def holm(pvals):
 
 def tests(seedavg, ep, budgets, attackers):
     """Pre-registered comparisons (docs/methodology.md, Section 6)."""
-    comps = [("typed", "lag"), ("typed", "shaped-b1"), ("typed", "shield"), ("typed", "ppo"),
+    comps = [("typed", "lag"), ("typed", "lag-fast"), ("typed", "lag-pid"),
+             ("typed", "shaped-b1"), ("typed", "shield"), ("typed", "ppo"),
              ("lag", "lag+S"), ("shaped-b1", "shaped-b1+S")]
     metrics = ["return", "cost_prod", "cost_traffic", "hard", "hard_free", "sat_all"]
     rows = []
@@ -308,6 +312,50 @@ def fig_learning(run_root, methods, budgets, path):
     h, lab = axes[0].get_legend_handles_labels()
     fig.legend(h, lab, loc="lower center", ncol=len(lab), fontsize=7, frameon=False)
     fig.tight_layout(rect=(0, 0.1, 1, 1))
+    fig.savefig(path)
+    plt.close(fig)
+
+
+def fig_dual(run_root, path):
+    """Lagrangian diagnostics: evidence multiplier, evidence violations and return
+    over training for the three Lagrangian variants (mean and 10-90% band)."""
+    methods = ["lag", "lag-fast", "lag-pid"]
+    panels = [("lambda_evidence", "$\\lambda_{\\mathrm{evid}}$ (log)"),
+              ("ep_evidence", "Evidence destroyed / episode"),
+              ("ep_return", "Security return")]
+    fig, axes = plt.subplots(1, 3, figsize=(8.4, 2.5))
+    found = False
+    for m in methods:
+        logs = []
+        for p in sorted(Path(run_root).glob(f"{m}_s*/train_log.csv")):
+            if (p.parent / "model.pt").exists():
+                logs.append(pd.read_csv(p).set_index("steps"))
+        if not logs:
+            continue
+        found = True
+        st = STYLE[m]
+        for ax, (col, title) in zip(axes, panels):
+            M = pd.concat([lg[col].rolling(5, min_periods=1).mean() for lg in logs], axis=1)
+            ax.plot(M.index / 1e6, M.mean(axis=1), color=st["c"], ls=st["ls"], lw=2, label=st["label"])
+            ax.fill_between(M.index / 1e6, M.quantile(0.1, axis=1), M.quantile(0.9, axis=1),
+                            color=st["c"], alpha=0.15, lw=0)
+    if not found:
+        plt.close(fig)
+        return
+    for ax, (col, title) in zip(axes, panels):
+        ax.set_title(title, fontsize=8)
+        ax.set_xlabel("Env. steps (M)", fontsize=8)
+        ax.tick_params(labelsize=7)
+        ax.grid(True, color="#e6e5e1", lw=0.6)
+        for sp in ("top", "right"):
+            ax.spines[sp].set_visible(False)
+    axes[0].set_yscale("symlog", linthresh=1)
+    axes[0].set_ylim(bottom=0)
+    axes[1].set_yscale("symlog", linthresh=1)
+    axes[1].set_ylim(bottom=0)
+    h, lab = axes[0].get_legend_handles_labels()
+    fig.legend(h, lab, loc="lower center", ncol=len(lab), fontsize=7, frameon=False)
+    fig.tight_layout(rect=(0, 0.12, 1, 1))
     fig.savefig(path)
     plt.close(fig)
 
@@ -460,6 +508,7 @@ def main():
     fig_learning(cfg["out_dir"], ["ppo", "shaped-b1", "lag", "shield", "typed"], budgets,
                  figd / "learning.pdf")
     fig_shaping(s_tr, budgets, figd / "shaping.pdf")
+    fig_dual(cfg["out_dir"], figd / "dual.pdf")
 
     pd.set_option("display.width", 200)
     for name in ("train_dist", "stealthy"):

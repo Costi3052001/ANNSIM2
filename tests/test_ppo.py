@@ -2,8 +2,8 @@ import numpy as np
 import pytest
 
 from safeacd.evaluate import run_episodes
-from safeacd.ppo import (METHODS, DualAscent, TrainConfig, TrainedPolicy,
-                         make_actor_critic, train)
+from safeacd.ppo import (METHODS, DualAscent, PIDDual, TrainConfig, TrainedPolicy,
+                         make_actor_critic, make_dual, train)
 from safeacd.env import N_ACTIONS, OBS_DIM, SafeACDEnv
 
 
@@ -13,6 +13,22 @@ def test_dual_ascent_projects_and_masks():
         lam = d.step(np.array([1.0, -1.0, 5.0, 5.0]))
     assert lam[0] > 0 and lam[1] == 0.0      # projected onto lambda >= 0
     assert lam[2] == 0.0 and lam[3] == 0.0   # unconstrained channels stay 0
+
+
+def test_lag_fast_removes_rate_limit_on_hard_channels_only():
+    mask = np.ones(4, dtype=bool)
+    d = make_dual(TrainConfig(method="lag-fast"), mask)
+    lam = d.step(np.array([5.0, 5.0, 5.0, 5.0]))
+    assert np.isclose(lam[0], 0.05) and np.isclose(lam[1], 0.05)   # budgets: clipped, as in lag/typed
+    assert np.isclose(lam[2], 2.5) and np.isclose(lam[3], 2.5)     # hard: 0.5 * 5, no clip
+
+
+def test_pid_dual_reacts_and_releases():
+    d = PIDDual(1, kp=1.0, ki=0.05, kd=0.0, mask=np.array([True]))
+    assert d.step(np.array([3.0]))[0] > 3.0          # immediate proportional reaction
+    for _ in range(5):
+        lam = d.step(np.array([-1.0]))
+    assert lam[0] == 0.0                              # releases once the constraint is slack
 
 
 @pytest.mark.parametrize("arch", ["entity", "mlp"])

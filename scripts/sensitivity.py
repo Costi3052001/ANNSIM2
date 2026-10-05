@@ -39,7 +39,7 @@ VARIANTS = {
     "false alerts x5": dict(p_false_alert=BASE.p_false_alert * 5),
     "exploit p=0.9": dict(p_exploit=0.9),
 }
-METHODS = ("typed", "lag", "shaped-b1")
+METHODS = ("typed", "lag", "lag-fast", "lag-pid", "shaped-b1")
 
 
 def _job(args):
@@ -99,7 +99,8 @@ def main():
 
     # LaTeX table: return / hard violations / P(all satisfied) per variant.
     meths = ["playbook"] + [m for m in METHODS if m in summ.index.get_level_values(1)]
-    names = {"playbook": "Playbook", "typed": "Typed", "lag": "Lag", "shaped-b1": "Shaped"}
+    names = {"playbook": "Playbook", "typed": "Typed", "lag": "Lag", "lag-fast": "Lag-fast",
+             "lag-pid": "Lag-PID", "shaped-b1": "Shaped"}
     lines = ["\\begin{table}[t]\\centering",
              "\\caption{Sensitivity of deployed policies to simulator parameters (training-distribution "
              "attackers, 50 CRN episodes each, mean over seeds). Cells: security return / hard "

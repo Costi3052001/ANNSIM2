@@ -35,10 +35,25 @@ def _cached(cache: Path, fn):
     return rows
 
 
+def _safe(fn, what, cache):
+    """Run an evaluation job; on failure log it and return no rows (queue continues)."""
+    try:
+        return fn()
+    except Exception as e:  # noqa: BLE001
+        import traceback
+        Path(cache).mkdir(parents=True, exist_ok=True)
+        with open(Path(cache).parent / "failed_evals.log", "a") as f:
+            f.write(f"=== {what}: {e!r}\n{traceback.format_exc()}\n")
+        print(f"FAILED evaluation {what}: {e!r}", flush=True)
+        return []
+
+
 def _eval_run(args):
     run_dir, attackers, n_ep, deploy_shield, cache = args
     tag = f"{Path(run_dir).name}_n{n_ep}_{'-'.join(attackers)}{'_S' if deploy_shield else ''}.csv"
-    return _cached(Path(cache) / tag, lambda: _eval_run_uncached(run_dir, attackers, n_ep, deploy_shield))
+    return _safe(lambda: _cached(Path(cache) / tag,
+                                 lambda: _eval_run_uncached(run_dir, attackers, n_ep, deploy_shield)),
+                 run_dir, cache)
 
 
 def _eval_run_uncached(run_dir, attackers, n_ep, deploy_shield):
@@ -60,7 +75,8 @@ def _eval_run_uncached(run_dir, attackers, n_ep, deploy_shield):
 def _eval_baseline(args):
     name, attackers, n_ep, cache = args
     tag = f"baseline-{name}_n{n_ep}_{'-'.join(attackers)}.csv"
-    return _cached(Path(cache) / tag, lambda: _eval_baseline_uncached(name, attackers, n_ep))
+    return _safe(lambda: _cached(Path(cache) / tag, lambda: _eval_baseline_uncached(name, attackers, n_ep)),
+                 f"baseline {name}", cache)
 
 
 def _eval_baseline_uncached(name, attackers, n_ep):
