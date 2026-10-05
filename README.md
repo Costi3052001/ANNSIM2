@@ -22,6 +22,20 @@ The proposed agent (`typed`) combines the two. It is compared against
 reward-only PPO, reward shaping (with a β sweep), Lagrangian-on-everything,
 shield-only, and a SOC playbook, in a purpose-built simulator.
 
+## Results at a glance (10 seeds, 100 CRN episodes per attacker)
+
+| Method | Security return | Downtime (≤10) | Blocked traffic (≤50) | Evidence destroyed / ep | Hard-violation-free episodes |
+|---|---|---|---|---|---|
+| SOC playbook | −46.0 | 7.9 | 41.7 | 0 | 100% |
+| PPO (reward only) | −1.5 | 494.1 | 1181.0 | 4.30 | 0.2% |
+| Shaped (β=1) | −36.1 | 4.2 | 21.5 | 3.02 | 5.7% |
+| PPO-Lagrangian | −60.5 | 8.1 | 54.4 | 1.01 | 49.2% |
+| PPO + Shield | −1.6 | 196.8 | 845.6 | 0.01 | 99.0% |
+| **Typed (Lag + Shield)** | −61.0 | 8.0 | 42.5 | 0.03 | **97.6%** |
+
+Full tables, figures, Holm-corrected tests and the hypothesis scorecard are in
+`paper/` and `docs/methodology.md` §11.
+
 ## Repository map
 
 | Path | What it is |

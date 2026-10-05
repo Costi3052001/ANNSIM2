@@ -126,7 +126,7 @@ SOC signals (a POMDP for the defender).
    the same evaluation episodes.
 
 ### 3.3 Verification and validation (V&V)
-- **Verification** (`tests/`, 20 tests): determinism under a seed; cost
+- **Verification** (`tests/`, 24 tests): determinism under a seed; cost
   semantics (image-then-reimage costs no evidence, reimage-without-image
   costs 1, the critical rule, blocked-link traffic); shield invariants; and
   smoke training for every method.
@@ -139,10 +139,10 @@ SOC signals (a POMDP for the defender).
 
   | Policy | B-line R / prod / traffic | Meander R / prod / traffic |
   |---|---|---|
-  | No defence | −1172 / 0 / 0 | −1127 / 0 / 0 |
-  | Random | −538 / 332 / 1025 | −370 / 332 / 1025 |
-  | SOC playbook | −87 / 14.4 / 59.9 | −12 / 3.1 / 29.3 |
-  | "Isolate OpServer + block" (reward hacker) | −48 / 200 / 1320 (+100 critical) | −48 / 200 / 1320 (+100 critical) |
+  | No defence | −1172.7 / 0 / 0 | −1131.0 / 0 / 0 |
+  | Random | −528.8 / 328.8 / 1019.4 | −387.1 / 328.8 / 1019.4 |
+  | SOC playbook | −78.8 / 12.5 / 52.4 | −13.3 / 3.2 / 31.0 |
+  | "Isolate OpServer + block" (reward hacker) | −47.6 / 200 / 1319.2 (+100 critical) | −47.6 / 200 / 1319.2 (+100 critical) |
 
   This ordering is what a domain expert expects. The last row shows the core
   problem: the highest *security* return comes from the most harmful policy.
@@ -194,7 +194,7 @@ handled (`safeacd/ppo.py`).
 
 **Budgets: "no more harm than the incumbent playbook".** d_prod = 10 and
 d_traffic = 50 per 100-step episode. These are the playbook's mean costs
-under the training distribution (8.7 and 44.6), rounded up. The hard
+under the training distribution (7.9 and 41.7 on the evaluation seeds), rounded up. The hard
 channels have d = 0.
 
 **Shared hyper-parameters** (not tuned per method):
@@ -305,7 +305,7 @@ ablation.
 
 ```bash
 pip install -e .[dev]           # numpy, torch (CPU is fine), pandas, scipy, matplotlib, pyyaml
-pytest -q                       # 20 verification tests
+pytest -q                       # 24 verification tests
 python scripts/calibrate.py     # reference-policy calibration table (§3.3)
 python scripts/run_experiments.py --config configs/experiment.yaml --jobs 4   # resumable
 python scripts/evaluate_all.py   --config configs/experiment.yaml --jobs 4
@@ -396,3 +396,25 @@ the evaluation and analysis steps with `--episodes 5`.
     - an image-freshness variant of H1 at deployment
       (`scripts/shield_variants.py`);
     - a P(no hard violation) metric with Clopper–Pearson bounds.
+
+---
+
+## 11. Outcome against the pre-registered hypotheses (10 seeds, 4–5 Oct 2026)
+
+Numbers are from `results/eval/summary_train_dist.csv`, `tests.csv` and
+`hard_violation_bounds.csv`. p-values are Holm-corrected.
+
+| Hypothesis | Outcome | Evidence |
+|---|---|---|
+| H1a reward-only PPO beats the playbook on security but violates every constraint | **Supported** | R −1.5 vs −46.0; downtime 494, traffic 1181, evidence 4.3/ep, OT isolated 60/100 steps |
+| H1b no β gives both safety and security | **Supported** | β ≤ 1: hard violations in ≥ 94% of episodes; β ≥ 3: safe but R −129.5 / −187.2 (Typed −61.0) |
+| H2a Typed meets all constraints more often than Lag and Shaped | **Supported** | 69.5% vs 33.8% (p = 0.006) and 5.7% (p = 0.006) |
+| H2b near-zero hard violations, train and deploy | **Supported, with a qualifier** | 47/2000 deployment episodes (97.6% violation-free), all monitor-relative H1 misses. Training-time cumulative hard violations are about 2 orders of magnitude below Lag |
+| H2c Typed security not worse than Lag | **Supported** | −61.0 vs −60.5 (p = 1.0) |
+| H3 deploy-only shield costs security | **Supported for Shaped** (−36 → −427, p = 0.006); **directional for Lag** | Lag −60.5 → −131.8, p = 0.18 (high seed variance) |
+| H4 hard rules hold OOD, budgets degrade for all | **Partly supported** | Budgets: every method exceeds them, including the playbook. H2 holds exactly. H1 degrades to 90.1% violation-free (Lag 33.4%, Shaped 0.9%). A freshness window of ≤ 3 steps restores 98.0% |
+
+**Honest negative.** The SOC playbook, whose mean harm defines the budgets,
+has better security than Typed at equal harm (−46.0 vs −61.0, paired CRN
+p < 1e−9). The paper frames its contribution as *how to constrain* a learned
+defender, not as RL beating playbooks.

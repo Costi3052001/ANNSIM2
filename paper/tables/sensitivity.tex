@@ -1,0 +1,13 @@
+\begin{table}[t]\centering
+\caption{Sensitivity of deployed policies to simulator parameters (training-distribution attackers, 50 CRN episodes each, mean over seeds). Cells: security return / hard violations per episode / $P$(all constraints satisfied).}
+\label{tab:sensitivity}\small\resizebox{\linewidth}{!}{%
+\begin{tabular}{lrrrr}\toprule
+Variant & Playbook & Typed & Lag & Shaped\\\midrule
+base & -42 / 0.00 / 0.63 & -57 / 0.02 / 0.71 & -56 / 1.09 / 0.34 & -31 / 2.81 / 0.07\\
+detect -25% & -124 / 0.00 / 0.24 & -147 / 0.07 / 0.27 & -163 / 2.04 / 0.11 & -115 / 6.63 / 0.01\\
+detect +25% & -9 / 0.00 / 0.95 & -18 / 0.02 / 0.95 & -11 / 0.52 / 0.54 & -6 / 1.19 / 0.16\\
+restore 1 step & -43 / 0.00 / 0.84 & -58 / 0.02 / 0.80 & -55 / 1.06 / 0.40 & -31 / 2.86 / 0.07\\
+restore 3 steps & -42 / 0.00 / 0.51 & -57 / 0.02 / 0.62 & -55 / 1.03 / 0.30 & -32 / 2.77 / 0.06\\
+false alerts x5 & -54 / 0.00 / 0.44 & -97 / 0.06 / 0.41 & -102 / 1.22 / 0.15 & -62 / 4.85 / 0.03\\
+exploit p=0.9 & -61 / 0.00 / 0.43 & -79 / 0.03 / 0.59 & -74 / 1.35 / 0.29 & -40 / 3.42 / 0.06\\
+\bottomrule\end{tabular}}\end{table}

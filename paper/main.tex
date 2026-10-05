@@ -53,9 +53,10 @@ pre-registered protocol with common random numbers, ten seeds, and a held-out
 attacker, we compare reward-only PPO, reward shaping, PPO-Lagrangian, shielded
 PPO and \typed{}. Reward-only PPO attains the best security score by
 severing the OT controller and blocking legitimate traffic at many times the
-budget. Shaping and PPO-Lagrangian keep the budgets but still violate a hard
-constraint in \resTrainShapedHardFreePctViol\% and \resTrainLagHardFreePctViol\% of
-episodes, even with an evidence multiplier near \lamFinalLagEvidence. \typed{}
+budget. Shaping and PPO-Lagrangian keep downtime within budget but still
+violate a hard constraint in \resTrainShapedHardFreePctViol\% and
+\resTrainLagHardFreePctViol\% of episodes respectively, the latter despite an
+evidence multiplier near \lamFinalLagEvidence. \typed{}
 meets both budgets and is free of hard violations in \resTrainTypedHardFreePct\% of
 episodes; the residual is attributable to undetected compromises.
 Simulator, agents and protocol are released for reproduction.
@@ -282,7 +283,7 @@ Budgets $d$ (prod, traf, evid, crit) & 10, 50, 0, 0 per episode \\
 \end{table}
 
 \paragraph{Verification and validation.}
-Twenty automated tests verify determinism under seeding, the cost semantics
+Twenty-four automated tests verify determinism under seeding, the cost semantics
 (image-then-reimage costs no evidence; reimage-without-image costs one; the
 critical rule; blocked-link traffic loss) and the shield invariants. For
 operational validation we ran four reference policies on the evaluation seeds
@@ -358,11 +359,11 @@ Holm-corrected. The full protocol is in the artefact
 % ----------------------------------------------------------------------------
 \section{Results}
 % ----------------------------------------------------------------------------
-\IfFileExists{tables/main.tex}{\input{tables/main.tex}}{\todo{run scripts/analyze.py}}
+\IfFileExists{tables/main.tex}{\input{tables/main.tex}}{\textit{[tables/main.tex missing: run scripts/analyze.py]}}
 
 \begin{figure}[t]
 \centering
-\IfFileExists{figures/pareto.pdf}{\includegraphics[width=0.62\linewidth]{figures/pareto.pdf}}{\todo{pareto figure}}
+\IfFileExists{figures/pareto.pdf}{\includegraphics[width=0.62\linewidth]{figures/pareto.pdf}}{\textit{[figures/pareto.pdf missing]}}
 \caption{Security return versus normalised collateral harm (log scale) under
 the training distribution; hollow markers indicate hard-constraint violations.}
 \label{fig:pareto}
@@ -370,7 +371,7 @@ the training distribution; hollow markers indicate hard-constraint violations.}
 
 \begin{figure}[t]
 \centering
-\IfFileExists{figures/learning.pdf}{\includegraphics[width=\linewidth]{figures/learning.pdf}}{\todo{learning curves}}
+\IfFileExists{figures/learning.pdf}{\includegraphics[width=\linewidth]{figures/learning.pdf}}{\textit{[figures/learning.pdf missing]}}
 \caption{Training dynamics (mean and 10--90\% band over seeds). Dashed lines
 are budgets. The right panel counts hard violations committed \emph{during
 training} (log scale).}
@@ -474,11 +475,21 @@ it argues for training with the rule that will be deployed.
 
 \begin{figure}[t]
 \centering
-\IfFileExists{figures/shaping.pdf}{\includegraphics[width=0.9\linewidth]{figures/shaping.pdf}}{\todo{shaping sweep}}
+\IfFileExists{figures/shaping.pdf}{\includegraphics[width=0.9\linewidth]{figures/shaping.pdf}}{\textit{[figures/shaping.pdf missing]}}
 \caption{Reward shaping across penalty weights $\beta$ (mean and 95\% CI over
 seeds), with \typed{} and PPO-Lagrangian as horizontal references.}
 \label{fig:shaping}
 \end{figure}
+
+\paragraph{Sensitivity to model parameters.}
+Re-evaluating the deployed policies under seven perturbed simulator settings
+(Table~\ref{tab:sensitivity}) changes absolute numbers, most strongly when
+detection probability drops by 25\%. It never changes the ordering of the
+learned methods: \typed{} has the fewest hard violations and the highest
+probability of meeting all constraints in every variant, followed by
+PPO-Lagrangian and then shaping, at comparable security to PPO-Lagrangian.
+
+\IfFileExists{tables/sensitivity.tex}{\input{tables/sensitivity.tex}}{}
 
 % ----------------------------------------------------------------------------
 \section{Discussion and Threats to Validity}

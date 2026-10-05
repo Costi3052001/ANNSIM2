@@ -198,22 +198,39 @@ def tests(seedavg, ep, budgets, attackers):
 
 # --------------------------------------------------------------------------- #
 def _place_labels(ax, pts, fontsize=7):
-    """Greedy non-overlapping direct labels (display-space nudging)."""
+    """Greedy non-overlapping direct labels.
+
+    For each point (highest first) try candidate offsets around the marker and
+    take the first whose text box overlaps neither earlier labels nor any
+    marker; fall back to a leader line further down.
+    """
     fig = ax.figure
     fig.canvas.draw()
+    scale = fig.dpi / 72.0
+    disp = [ax.transData.transform((x, y)) for (x, y, _) in pts]
+    markers = [(px - 6, py - 6, px + 6, py + 6) for (px, py) in disp]
     placed = []
-    for (x, y, text) in sorted(pts, key=lambda p: -p[1]):
-        px, py = ax.transData.transform((x, y))
-        dx, dy = 7, 3
-        for _ in range(40):
-            box = (px + dx, py + dy - 4, px + dx + 6.2 * len(text), py + dy + 8)
-            if all(box[2] < b[0] or box[0] > b[2] or box[3] < b[1] or box[1] > b[3] for b in placed):
+
+    def free(b):
+        return all(b[2] < o[0] or b[0] > o[2] or b[3] < o[1] or b[1] > o[3] for o in placed + markers)
+
+    for i in sorted(range(len(pts)), key=lambda j: -pts[j][1]):
+        x, y, text = pts[i]
+        px, py = disp[i]
+        w, h = 5.0 * scale * len(text), 9 * scale
+        cands = [(8, 2), (8, -h - 2), (-8 - w, 2), (-8 - w, -h - 2), (8, h + 4), (8, -2 * h - 6),
+                 (-8 - w, h + 4), (-8 - w, -2 * h - 6)]
+        cands += [(8, -h - 2 - k * (h + 3)) for k in range(2, 10)]
+        for dx, dy in cands:
+            box = (px + dx, py + dy, px + dx + w, py + dy + h)
+            if free(box):
                 break
-            dy -= 11
         placed.append(box)
-        ax.annotate(text, (x, y), textcoords="offset points", xytext=(dx * 72 / fig.dpi, dy * 72 / fig.dpi),
-                    fontsize=fontsize, color="#0b0b0b", va="bottom",
-                    arrowprops=dict(arrowstyle="-", color="#9a9893", lw=0.6) if dy < -5 else None)
+        far = abs(dy) > 2 * h or dx < 0 and abs(dy) > h
+        ax.annotate(text, (x, y), textcoords="offset points",
+                    xytext=(dx / scale, dy / scale), fontsize=fontsize, color="#0b0b0b",
+                    ha="left", va="bottom",
+                    arrowprops=dict(arrowstyle="-", color="#9a9893", lw=0.6) if far else None)
 
 
 def fig_pareto(summ, budgets, path):
@@ -233,8 +250,9 @@ def fig_pareto(summ, budgets, path):
     ax.axvline(1.0, color="#52514e", lw=1, ls="--")
     ax.set_xscale("log")
     lo, hi = ax.get_xlim()
-    ax.set_xlim(min(lo, 0.1), hi * 3)
-    ax.text(1.05, 0.02, "budget", transform=ax.get_xaxis_transform(), fontsize=7, color="#52514e")
+    ax.set_xlim(min(lo, 0.1) / 3, hi * 12)
+    ax.text(1.05, 0.96, "budget", transform=ax.get_xaxis_transform(), fontsize=7, color="#52514e",
+            va="top")
     ax.set_xlabel("Collateral harm: max(downtime/budget, traffic/budget)  [log]")
     ax.set_ylabel("Security return (higher is better)")
     ax.grid(True, color="#e6e5e1", lw=0.6)
@@ -332,6 +350,14 @@ def fig_shaping(summ, budgets, path):
     plt.close(fig)
 
 
+def fmt_p(p):
+    """p-value for use inside math mode: 3 s.f., scientific notation below 1e-3."""
+    if p >= 1e-3:
+        return f"{p:.3g}"
+    mant, exp = f"{p:.1e}".split("e")
+    return f"{mant}\\times10^{{{int(exp)}}}"
+
+
 def write_macros(summaries, tests_df, path, ubs=None, extra=None):
     """Emit \\newcommand macros so every number in the paper text is generated."""
     words = {"0.1": "Tenth", "0.3": "ThreeTenths", "1": "", "3": "Three", "10": "Ten"}
@@ -376,7 +402,7 @@ def write_macros(summaries, tests_df, path, ubs=None, extra=None):
             lines.append(f"\\newcommand{{\\nhard{dist}{key(m)}}}{{{k}/{n}}}")
     for _, r in tests_df.iterrows():
         k = key(r.a) + "Vs" + key(r.b.split(" ")[0]) + "".join(ch for ch in r.metric.title() if ch.isalpha())
-        lines.append(f"\\newcommand{{\\p{k}}}{{{r.p_holm:.3g}}}")
+        lines.append(f"\\newcommand{{\\p{k}}}{{{fmt_p(r.p_holm)}}}")
     Path(path).write_text("\n".join(lines) + "\n")
 
 

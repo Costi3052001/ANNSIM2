@@ -1,0 +1,29 @@
+variant,method,return,cost_prod,cost_traffic,hard,sat_all
+base,lag,-55.97,7.76,51.73,1.09,0.34
+base,playbook,-42.36,7.57,39.98,0.0,0.63
+base,shaped-b1,-30.97,3.76,19.03,2.81,0.07
+base,typed,-57.11,7.56,40.62,0.02,0.71
+detect +25%,lag,-10.58,1.81,16.3,0.52,0.54
+detect +25%,playbook,-8.83,2.14,12.91,0.0,0.95
+detect +25%,shaped-b1,-5.83,0.68,5.37,1.19,0.16
+detect +25%,typed,-17.99,1.7,12.89,0.02,0.95
+detect -25%,lag,-162.75,20.46,115.29,2.04,0.11
+detect -25%,playbook,-124.5,20.94,96.38,0.0,0.24
+detect -25%,shaped-b1,-114.96,15.03,66.66,6.63,0.01
+detect -25%,typed,-147.14,21.45,98.57,0.07,0.27
+exploit p=0.9,lag,-74.29,10.29,64.06,1.35,0.29
+exploit p=0.9,playbook,-61.28,11.86,59.14,0.0,0.43
+exploit p=0.9,shaped-b1,-39.6,4.86,23.98,3.42,0.06
+exploit p=0.9,typed,-78.6,11.27,57.13,0.03,0.59
+false alerts x5,lag,-101.84,11.12,93.09,1.22,0.15
+false alerts x5,playbook,-53.6,11.88,61.1,0.0,0.44
+false alerts x5,shaped-b1,-61.95,5.7,31.8,4.85,0.03
+false alerts x5,typed,-96.88,18.41,86.04,0.06,0.41
+restore 1 step,lag,-54.86,4.56,37.73,1.06,0.4
+restore 1 step,playbook,-42.58,3.96,20.54,0.0,0.84
+restore 1 step,shaped-b1,-30.68,1.99,10.55,2.86,0.07
+restore 1 step,typed,-57.62,4.61,27.22,0.02,0.8
+restore 3 steps,lag,-55.05,10.55,63.3,1.03,0.3
+restore 3 steps,playbook,-42.46,11.15,57.48,0.0,0.51
+restore 3 steps,shaped-b1,-32.38,5.58,27.43,2.77,0.06
+restore 3 steps,typed,-57.49,10.53,53.98,0.02,0.62
