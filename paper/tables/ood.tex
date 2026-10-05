@@ -1,0 +1,20 @@
+\begin{table}[t]
+\centering
+\caption{Out-of-distribution evaluation against the held-out low-and-slow (Stealthy) attacker.}
+\label{tab:ood}
+\setlength{\tabcolsep}{3pt}
+\resizebox{\linewidth}{!}{%
+\begin{tabular}{lrrrrrrr}
+\toprule
+Method & Security return $\uparrow$ & Downtime $\downarrow$ & Blocked traffic $\downarrow$ & Evidence destroyed $\downarrow$ & Critical viol. $\downarrow$ & $P$(no hard viol.) $\uparrow$ & $P$(all satisfied) $\uparrow$\\
+ & & (budget 10) & (budget 50) & (budget 0) & (budget 0) & & \\
+\midrule
+SOC playbook & -194.8 & 32.7 & 133.0 & 0.00 & 0.00 & 1.000 & 0.03\\
+PPO (reward only) & -10.5 \scriptsize[-18.8, -4.2] & 502.0 \scriptsize[294.5, 677.2] & 1194.3 \scriptsize[963.5, 1411.3] & 5.31 \scriptsize[2.13, 9.79] & 60.77 \scriptsize[34.42, 84.86] & 0.002 \scriptsize[0.000, 0.006] & 0.00\\
+Shaped ($\beta$=1) & -218.1 \scriptsize[-246.2, -194.8] & 31.8 \scriptsize[26.6, 36.6] & 128.6 \scriptsize[108.2, 147.2] & 6.86 \scriptsize[5.52, 7.97] & 0.03 \scriptsize[0.01, 0.06] & 0.009 \scriptsize[0.000, 0.026] & 0.00\\
+PPO-Lagrangian & -273.7 \scriptsize[-294.2, -250.2] & 37.7 \scriptsize[34.6, 40.5] & 177.7 \scriptsize[162.3, 192.5] & 2.47 \scriptsize[0.86, 4.32] & 0.76 \scriptsize[0.21, 1.38] & 0.334 \scriptsize[0.158, 0.533] & 0.01 \scriptsize[0.00, 0.01]\\
+PPO+Shield & -4.5 \scriptsize[-7.3, -2.7] & 200.3 \scriptsize[62.1, 347.7] & 852.1 \scriptsize[663.5, 1066.8] & 0.01 \scriptsize[0.00, 0.02] & 0.00 & 0.993 \scriptsize[0.984, 1.000] & 0.00\\
+Typed (Lag+Shield) & -226.4 \scriptsize[-249.9, -200.3] & 32.1 \scriptsize[27.5, 36.1] & 132.8 \scriptsize[112.8, 149.9] & 0.11 \scriptsize[0.06, 0.16] & 0.00 & 0.901 \scriptsize[0.853, 0.948] & 0.06 \scriptsize[0.01, 0.14]\\
+\bottomrule
+\end{tabular}}
+\end{table}

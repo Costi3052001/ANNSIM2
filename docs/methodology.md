@@ -239,7 +239,8 @@ grid).**
 **Training.**
 - 1 M environment steps per run (10,000 episodes).
 - Seeds 1–10 (seed 0 was used only for pilots). The first execution ran
-  seeds 1–5, seed-major. `run_experiments.py` resumes and adds seeds 6–10.
+  all 10 seeds, seed-major. `run_experiments.py` is resumable: it skips any
+  run whose `model.pt` exists.
 - The training attacker is a uniform B-line/Meander mixture.
 - Main grid: 5 methods × 10 seeds = 50 runs.
 - β-sweep for `shaped`: β ∈ {0.1, 0.3, 3, 10} × 5 seeds = 20 runs. β = 1
@@ -381,3 +382,17 @@ the evaluation and analysis steps with `--episodes 5`.
     - main-grid seeds 1–10 (seed 0 is reserved for pilots).
   - Pilots (seed 0): plain-SGD dual → Adam dual → clipped dual; flat MLP →
     entity network. See §4.
+- 2026-10-04/05 (main grid):
+  - An interim look at seeds 1–5 showed the pre-registered test cannot reach
+    significance at n = 5. With 5 vs 5 seeds the minimum exact two-sided
+    Mann–Whitney p is 0.0079, which cannot survive Holm correction over the
+    test family.
+  - We therefore ran the planned n = 10 seeds rather than change the test.
+    No hypothesis, metric or test was altered.
+  - Two container restarts interrupted in-flight runs. Interrupted runs were
+    re-run from scratch, since resumption is per run and not mid-run.
+    Completed runs are unaffected.
+  - Added after the main grid, as clearly labelled exploratory analyses:
+    - an image-freshness variant of H1 at deployment
+      (`scripts/shield_variants.py`);
+    - a P(no hard violation) metric with Clopper–Pearson bounds.

@@ -11,3 +11,5 @@ paper/*.out
 paper/*.fdb_latexmk
 paper/*.fls
 paper/*.synctex.gz
+results/eval/per_run/
+results/*.log

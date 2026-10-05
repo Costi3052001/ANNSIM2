@@ -1,0 +1,7 @@
+dist,variant,return,cost_prod,cost_traffic,cost_evidence,hard_free
+training,H1 (no window),-60.984,8.049,42.501,0.025,0.976
+training,H1 + image age <= 3,-79.875,9.215,48.055,0.012,0.988
+training,H1 + image age <= 1,-104.064,10.316,55.735,0.003,0.997
+stealthy (OOD),H1 (no window),-226.38,32.051,132.794,0.108,0.901
+stealthy (OOD),H1 + image age <= 3,-231.168,31.146,131.621,0.021,0.98
+stealthy (OOD),H1 + image age <= 1,-241.272,29.426,128.058,0.005,0.996

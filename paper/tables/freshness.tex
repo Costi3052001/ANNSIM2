@@ -1,0 +1,12 @@
+\begin{table}[t]\centering
+\caption{Typed policies deployed with H1 tightened by an image-freshness window (evaluation only; mean over seeds, 100 CRN episodes per attacker).}
+\label{tab:freshness}\small
+\begin{tabular}{llrrrr}\toprule
+Attackers & H1 variant & Return & Traffic & Evidence destroyed & $P$(no hard viol.)\\\midrule
+training & H1 (no window) & -61.0 & 42.5 & 0.025 & 0.977\\
+training & H1 + image age $\le$ 3 & -79.9 & 48.1 & 0.013 & 0.988\\
+training & H1 + image age $\le$ 1 & -104.1 & 55.7 & 0.003 & 0.997\\
+stealthy (OOD) & H1 (no window) & -226.4 & 132.8 & 0.108 & 0.901\\
+stealthy (OOD) & H1 + image age $\le$ 3 & -231.2 & 131.6 & 0.021 & 0.980\\
+stealthy (OOD) & H1 + image age $\le$ 1 & -241.3 & 128.1 & 0.005 & 0.996\\
+\bottomrule\end{tabular}\end{table}

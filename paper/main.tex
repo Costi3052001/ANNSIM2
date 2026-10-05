@@ -342,7 +342,7 @@ and traffic cost under the training distribution are 7.9 and 41.7.
 
 \paragraph{Protocol.}
 Each condition is trained for $10^6$ steps on a uniform B-line/Meander mixture
-with independent seeds (seed 0 was reserved for pilot runs; \todo{update seed count: 5 executed, 10 planned}; three for the $\beta$ sweep). Each trained stochastic policy is
+with ten independent seeds (seeds 1--10; seed 0 was reserved for pilot runs that fixed the architecture and dual step) and three seeds per $\beta$ in the sweep. Each trained stochastic policy is
 evaluated for 100 episodes per attacker, including the held-out Stealthy
 attacker. Evaluation episode $i$ uses the same seed for every policy, and the
 red, green and detection processes draw from independent random streams, so
@@ -383,54 +383,72 @@ Reward-only PPO reaches a near-perfect security return
 \resTrainPpoCrit{} of 100 steps per episode, keeping production hosts offline
 for \resTrainPpoProd{} host-steps (budget 10), blocking \resTrainPpoTraf{}
 units of legitimate traffic (budget 50) and destroying evidence
-\resTrainPpoEvid{} times per episode. Adding the shield alone (PPO+Shield)
-removes the hard violations but not the budget harm (\resTrainShieldProd{} and
+\resTrainPpoEvid{} times per episode. The shield alone (PPO+Shield) removes
+the hard violations but not the budget harm (\resTrainShieldProd{} and
 \resTrainShieldTraf). Reward shaping with $\beta=1$ keeps both budgets and
-never isolates the controller, yet destroys evidence \resTrainShapedEvid{}
-times per episode and violates a hard constraint in
-\resTrainShapedHardFreePctViol\% of episodes, although each evidence
-destruction is penalised ten times more than a server-step of downtime: the
-agent has simply priced the irreversible harm in. Figure~\ref{fig:shaping}
-shows that no single $\beta$ removes this behaviour without giving up
-security \todo{confirm wording against the $\beta$-sweep figure}.
+almost never isolates the controller, yet destroys evidence
+\resTrainShapedEvid{} times per episode and violates a hard constraint in
+\resTrainShapedHardFreePctViol\% of episodes, although each destruction costs
+ten times a server-step of downtime. The agent has simply priced the
+irreversible harm in, and that is where its higher security return
+(\resTrainShapedR{} vs.\ \resTrainTypedR{} for \typed;
+$p_{\text{Holm}}=\pTypedVsShapedReturn$) comes from. The $\beta$ sweep
+(Figure~\ref{fig:shaping}) shows the trade-off:
+\begin{itemize}
+\item with $\beta\le 1$, evidence is destroyed in at least
+\resTrainShapedHardFreePctViol\% of episodes ($\beta=0.3$:
+\resTrainShapedThreeTenthsHardFreePctViol\%);
+\item with $\beta\ge 3$, harm disappears but security collapses to
+\resTrainShapedThreeR{} ($\beta=3$) and \resTrainShapedTenR{} ($\beta=10$).
+\end{itemize}
+No penalty weight gives both safety and security, so the weight is a tuning
+burden, not a guarantee.
 
 \paragraph{RQ2: Typing the constraints.}
-\typed{} satisfies both budgets in expectation (downtime
-\resTrainTypedProd, traffic \resTrainTypedTraf) and is free of hard
-violations in \resTrainTypedHardFreePct\% of episodes
-(\nhardTrainTyped{} episodes with a violation; 95\% upper bound
-\ubTrainTyped\%), all of which are monitor-relative H1 misses; the OT rule is
-never violated. PPO-Lagrangian, which treats evidence and the OT rule as
-zero-budget constraints, ends training with multipliers of
+\typed{} satisfies both budgets in expectation (downtime \resTrainTypedProd,
+traffic \resTrainTypedTraf). It is free of hard violations in
+\resTrainTypedHardFreePct\% of episodes (\nhardTrainTyped{} episodes with a
+violation), all of them monitor-relative H1 misses; the OT rule is never
+violated. PPO-Lagrangian treats evidence and the OT rule as zero-budget
+constraints. It ends training with multipliers of
 $\lambda_{\text{evid}}\approx\lamFinalLagEvidence$ and
 $\lambda_{\text{crit}}\approx\lamFinalLagCritical$, yet still commits a hard
-violation in \resTrainLagHardFreePctViol\% of episodes and exceeds the traffic
-budget (\resTrainLagTraf). Expectation constraints are the wrong contract for
-irreversible harm: the multiplier only grows \emph{after} violations have
-happened, so they accumulate throughout training (Figure~\ref{fig:learning},
-right) and persist at deployment. Security is comparable
-(\resTrainTypedR{} vs.\ \resTrainLagR; $p_{\text{Holm}}=\pTypedVsLagReturn$),
-and \typed{} meets all four constraints in more episodes
-(\resTrainTypedSatPct\% vs.\ \resTrainLagSatPct\%;
-$p_{\text{Holm}}=\pTypedVsLagSatAll$). Against the incumbent playbook, whose
-mean harm defines the budgets, \typed{} incurs the same downtime and traffic
-(paired CRN tests, $p_{\text{Holm}}=\pTypedVsPlaybookCostProd$ and
+violation in \resTrainLagHardFreePctViol\% of episodes
+($p_{\text{Holm}}=\pTypedVsLagHardFree$) and exceeds the traffic budget on
+average (\resTrainLagTraf). Expectation constraints are the wrong contract
+for irreversible harm: a multiplier only grows \emph{after} violations have
+happened, so violations accumulate throughout training
+(Figure~\ref{fig:learning}, right) and persist at deployment. Security is
+indistinguishable (\resTrainTypedR{} vs.\ \resTrainLagR;
+$p_{\text{Holm}}=\pTypedVsLagReturn$), and \typed{} meets all four
+constraints in about twice as many episodes (\resTrainTypedSatPct\% vs.\
+\resTrainLagSatPct\%; $p_{\text{Holm}}=\pTypedVsLagSatAll$). Against the
+incumbent playbook, whose mean harm defines the budgets, \typed{} incurs the
+same downtime and traffic (paired CRN tests,
+$p_{\text{Holm}}=\pTypedVsPlaybookCostProd$ and
 $\pTypedVsPlaybookCostTraffic$) but a lower security return
 (\resTrainTypedR{} vs.\ \resTrainPlaybookR;
 $p_{\text{Holm}}=\pTypedVsPlaybookReturn$).
 
 \paragraph{RQ3: The shield belongs in the training loop.}
 Attaching the shield only at deployment (bottom block of
-Table~\ref{tab:main}) removes most hard violations, but its effect on
-security depends on how much the policy relied on unsafe shortcuts.
-PPO-Lagrangian, which had partly learned to image first, loses little
-(\resTrainLagR{} $\to$ \resTrainLagDeployR). Shaped PPO, whose learned
-remediation is ``reimage without imaging'', collapses
-(\resTrainShapedR{} $\to$ \resTrainShapedDeployR;
-$p_{\text{Holm}}=\pShapedVsShapedDeployReturn$), because the masked policy
-is far from the one that was trained. Reward-only PPO with the shield still
-exceeds the budgets by an order of magnitude. Training with the shield lets
-the policy learn the ``image, then reimage'' sequence instead.
+Table~\ref{tab:main}) removes most hard violations, but the policy then acts
+in states its training never visited.
+\begin{itemize}
+\item \textbf{Shaped PPO} learned ``reimage without imaging'' as its main
+remediation, and its security collapses (\resTrainShapedR{} $\to$
+\resTrainShapedDeployR; $p_{\text{Holm}}=\pShapedVsShapedDeployReturn$).
+\item \textbf{PPO-Lagrangian} degrades on average (\resTrainLagR{} $\to$
+\resTrainLagDeployR; IQM \resTrainLagRIqm{} $\to$ \resTrainLagDeployRIqm)
+and its traffic rises to \resTrainLagDeployTraf. The effect varies widely
+across seeds and is not significant after correction
+($p_{\text{Holm}}=\pLagVsLagDeployReturn$).
+\item \textbf{Reward-only PPO} with the shield still exceeds the budgets by
+an order of magnitude.
+\end{itemize}
+Training with the shield lets the policy learn the ``image, then reimage''
+sequence. \typed{} reaches a better return than every deploy-only variant at
+equal or lower harm.
 
 \paragraph{RQ4: A held-out attacker.}
 Against the unseen low-and-slow attacker (Table~\ref{tab:ood}) every defender
@@ -447,7 +465,7 @@ the stealthy attacker from \freshOodKNoneHardFreePct\% to
 \freshOodKThreeHardFreePct\% (one step: \freshOodKOneHardFreePct\%), at a
 small cost in security. Under the training distribution, however, tightening
 the rule only at deployment costs security (\freshTrainKNoneR{} $\to$
-\freshTrainKOneR{} for one step) and pushes traffic over budget
+\freshTrainKOneR{} for one step) and pushes traffic towards or over budget
 (\freshTrainKOneTraf). This is the same train/deploy mismatch as in RQ3, and
 it argues for training with the rule that will be deployed.
 
